@@ -15,6 +15,10 @@
 3. Install the requirements -> `pip install -r requirements.txt`
 4. Run the application -> `python main.py`
 
+## Report
+
+1. Markdown Document is located at `report/final_report.md`
+
 ---
 
 # TODO
@@ -30,6 +34,7 @@
 8. Integrate the visualization of the portfolio and metrics [ ]
 9. Integrate the output files and metrics [ ]
 10. Integrate the comparison class [ ]
+11. Write the final report [ ]
 
 **Last updated at:** 2024-01-09 06:42:00 UTC+03:00
 
