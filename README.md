@@ -23,7 +23,7 @@
 
 # TODO
 
-1. Complete the integration of the portfolio class and relevant methods [ ]
+1. Complete the integration of the portfolio class and relevant methods [X]
 2. Complete the integration of the GPT client []
 3. Complete the integration of the strategies / indicator based ones [ ]
 4. Complete the integration of the strategies / GPT based ones [ ]

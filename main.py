@@ -1,5 +1,6 @@
 import json
 import os
+from pprint import pprint
 
 from exchange.Exchange import Exchange
 from models.Portfolio import Portfolio
@@ -14,10 +15,9 @@ class HyperParameters:
     class Fund:
         initial_cash = 1_000_000  # initial cash
         risk_free_rate = 0.01  # 1% per annum risk free rate
-        min_short_position = -10_000  # min short position per instrument
-        max_long_position = 10_000  # max long position per instrument
+        safety_margin = 5  # 500% of the initial cash
 
-        transaction_quantity = 100  # N of shares per transaction
+        transaction_quantity = 1  # N of shares per transaction
         trade_frequency = 1  # Every N days
 
     class Data:
@@ -113,14 +113,13 @@ def simulate(strategy, download_data=False, external_data=True):
         ################################################################################################################
         portfolio = Portfolio(
             HyperParameters.Fund.initial_cash,
+            HyperParameters.Fund.transaction_quantity,
             HyperParameters.Fund.risk_free_rate,
-            HyperParameters.Fund.min_short_position,
-            HyperParameters.Fund.max_long_position,
-            HyperParameters.Fund.transaction_quantity)
+            HyperParameters.Fund.safety_margin)
 
         inst = strategy()
         exchange = Exchange()
-        positions = []
+        current_prices = {}
         for i, date in enumerate(pd.date_range(start=HyperParameters.Test.start_date, end=HyperParameters.Test.end_date)):
             signals = inst.generate_signals(date, universe, portfolio)
 
@@ -128,43 +127,58 @@ def simulate(strategy, download_data=False, external_data=True):
                 # print(f"Skipping trade on {date}")
                 continue
 
+            # current prices
+            for symbol, dataframe in universe.items():
+                current_prices[symbol] = dataframe[dataframe['Date'] == date]['Close'].values[0]
+
             # run the orders
-            portfolio = exchange.execute_orders(date, universe, portfolio, signals)
+            portfolio, res = exchange.execute_orders(date, universe, portfolio, signals, current_prices)
+
+            buys = 0
+            sells = 0
+            shorts = 0
+            covers = 0
+            holds = 0
+            if res is not None and type(res) == dict:
+                buys = res["buys"]
+                sells = res["sells"]
+                shorts = res["shorts"]
+                covers = res["covers"]
+                holds = res["holds"]
 
             # show the portfolio
-            if i % 10 == 0:
-                print(f"Positions on {date}: {portfolio.positions}")
-                print(f"Cash on {date}: {portfolio.cash}")
-                print(f"Total returns on {date}: {portfolio.total_returns[-1]}")
-                print(f"Portfolio Value on {date}: {portfolio.portfolio_values[-1]}")
-                print(f"Sharpe ratio on {date}: {portfolio.sharpe_ratios[-1]}")
-                print(f"Max Drawdown on {date}: {portfolio.max_drawdowns[-1]}")
-                print("==========================================")
+            if i % 1 == 0:
+                print(f"==========================================")
+                print(f"DATE: {date.strftime('%Y-%m-%d')}")
+                print(f"Total Portfolio Value: {portfolio.current_portfolio_value}")
+                print(f"   - Cash ($): {portfolio.cash}")
+                print(f"   - Asset Value ($): {portfolio.current_asset_value}")
+                print(f"Positions: {portfolio.positions}")
+                print(f"   - Buys: {buys}")
+                print(f"   - Sells: {sells}")
+                print(f"   - Shorts: {shorts}")
+                print(f"   - Covers: {covers}")
+                print(f"   - Holds: {holds}")
+                print(f"Total Orders: {buys + sells + shorts + covers + holds}")
 
-            positions.append({
-                'date': date.strftime('%Y-%m-%d'),
-                'positions': portfolio.positions,
-            })
+            if res is not None and res == "BANKRUPT":
+                print(f"==========================================")
+                print(f"DATE: {date.strftime('%Y-%m-%d')}")
+                print(f"BANKRUPTCY, failing the simulation...")
+                print(f"==========================================")
+                break
 
-        print("==========================================")
-        print("FINAL RESULTS")
-        print("==========================================")
-        print(f"Final portfolio value: {portfolio.total_value}")
-        print(f"Final portfolio cash: {portfolio.cash}")
-        print(f"Final portfolio positions: {portfolio.positions}")
-        print(f"Final portfolio total returns: {portfolio.total_returns[-1]}")
-        print(f"Final portfolio sharpe ratio: {portfolio.sharpe_ratios[-1]}")
-        print(f"Final portfolio max drawdown: {portfolio.max_drawdowns[-1]}")
-
-        # visualize the portfolio
-        portfolio.visualize_financial_metrics(strategy.__name__.replace("/", "_"))
+        # print the metrics
+        portfolio.visualize_metrics(strategy_name=inst.name)
 
         # save the positions
+        """
         try:
             with open(f'output_portfolios/{strategy.__name__.replace("/", "_")}/positions.json', 'w') as f:
                 json.dump(positions, f)
         except Exception as e:
             print(f"Error saving positions: {e}")
+        """
 
 
 if __name__ == '__main__':
@@ -174,6 +188,4 @@ if __name__ == '__main__':
 
     # Try the 'Naive Long Short Strategy', which is a simple strategy that buys if the price is higher than the price
     # 10 days ago, sells if the price is lower than the price 10 days ago, and holds otherwise.
-    """
-    simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True)
-    """
+    # simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True)

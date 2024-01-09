@@ -22,18 +22,31 @@ class NaiveLongShortStrategy:
         # if the price is higher than the price 10 days ago, buy
         # if the price is lower than the price 10 days ago, sell
         # otherwise, hold
+
+        window = 2
+
+        signals = {
+            0: 'buy',
+            1: 'sell',
+            2: 'short',
+            3: 'cover',
+            4: 'hold',
+        }
+
+        if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+            return signals[4]
+
         price_today = dataframe[dataframe['Date'] == date]['Close'].values[0]
-        if len(dataframe[dataframe['Date'] == date - pd.Timedelta(days=10)]) == 0:
-            return 'hold'
-        else:
-            price_10_days_ago = dataframe[dataframe['Date'] == date - pd.Timedelta(days=10)]['Close'].values[0]
+        price_10_days_ago = dataframe[dataframe['Date'] == date - pd.Timedelta(days=window)]['Close'].values[0]
 
         if price_today > price_10_days_ago:
-            return 'long'
+            return signals[0]
         elif price_today < price_10_days_ago:
-            return 'short'
+            return signals[1]
+        elif price_today == price_10_days_ago:
+            return signals[4]
         else:
-            return 'hold'
+            print(f"Unknown signal for symbol {symbol} on date {date}")
 
     def generate_signals(self, date, universe, portfolio):
         signals = {}
