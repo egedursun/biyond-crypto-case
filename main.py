@@ -1,13 +1,11 @@
-import json
 import os
-from pprint import pprint
 
 from exchange.Exchange import Exchange
 from models.Portfolio import Portfolio
 from scraper.ScraperAgent import ScraperAgent
 import pandas as pd
 
-from strategies import randoms, naives
+from strategies import randoms, naives, rsi
 
 
 class HyperParameters:
@@ -17,8 +15,11 @@ class HyperParameters:
         risk_free_rate = 0.01  # 1% per annum risk free rate
         safety_margin = 5  # 500% of the initial cash
 
-        transaction_quantity = 1  # N of shares per transaction
+        transaction_volume = 10  # N of shares per transaction
         trade_frequency = 1  # Every N days
+
+        # TODO: extra parameters --- '''Not Implemented Yet'''
+        transaction_cost = 0.01  # 1% of the transaction volume
 
     class Data:
         universe_size = 5
@@ -34,7 +35,7 @@ class HyperParameters:
         end_date = '2022-01-01'
 
 
-def simulate(strategy, download_data=False, external_data=True):
+def simulate(strategy, download_data=False, external_data=True, **kwargs):
     if download_data:
         while HyperParameters.Data.universe_size > len(HyperParameters.Data.symbols):
             # take samples from csv
@@ -113,15 +114,16 @@ def simulate(strategy, download_data=False, external_data=True):
         ################################################################################################################
         portfolio = Portfolio(
             HyperParameters.Fund.initial_cash,
-            HyperParameters.Fund.transaction_quantity,
+            HyperParameters.Fund.transaction_volume,
             HyperParameters.Fund.risk_free_rate,
             HyperParameters.Fund.safety_margin)
 
         inst = strategy()
         exchange = Exchange()
         current_prices = {}
+        benchmark = pd.DataFrame(columns=["Date", "Close"])
         for i, date in enumerate(pd.date_range(start=HyperParameters.Test.start_date, end=HyperParameters.Test.end_date)):
-            signals = inst.generate_signals(date, universe, portfolio)
+            signals = inst.generate_signals(date, universe, portfolio, **kwargs)
 
             if i % HyperParameters.Fund.trade_frequency != 0:
                 # print(f"Skipping trade on {date}")
@@ -131,20 +133,25 @@ def simulate(strategy, download_data=False, external_data=True):
             for symbol, dataframe in universe.items():
                 current_prices[symbol] = dataframe[dataframe['Date'] == date]['Close'].values[0]
 
-            # run the orders
-            portfolio, res = exchange.execute_orders(date, universe, portfolio, signals, current_prices)
+            # benchmark for the day
+            current_prices_list = []
+            for symbol, dictionary in current_prices.items():
+                current_prices_list.append(dictionary)
+            average_close = sum(current_prices_list) / len(current_prices_list)
+            # add the average close to the benchmark
+            benchmark = pd.concat([benchmark, pd.DataFrame([[date, average_close]], columns=["Date", "Close"])],
+                                  ignore_index=True)
 
-            buys = 0
-            sells = 0
-            shorts = 0
-            covers = 0
-            holds = 0
+            # run the orders
+            portfolio, res = exchange.execute_orders(date, universe, portfolio, average_close, signals, current_prices)
+
+            positives = 0
+            negatives = 0
+            neutrals = 0
             if res is not None and type(res) == dict:
-                buys = res["buys"]
-                sells = res["sells"]
-                shorts = res["shorts"]
-                covers = res["covers"]
-                holds = res["holds"]
+                positives = res["positives"]
+                negatives = res["negatives"]
+                neutrals = res["neutrals"]
 
             # show the portfolio
             if i % 1 == 0:
@@ -154,12 +161,10 @@ def simulate(strategy, download_data=False, external_data=True):
                 print(f"   - Cash ($): {portfolio.cash}")
                 print(f"   - Asset Value ($): {portfolio.current_asset_value}")
                 print(f"Positions: {portfolio.positions}")
-                print(f"   - Buys: {buys}")
-                print(f"   - Sells: {sells}")
-                print(f"   - Shorts: {shorts}")
-                print(f"   - Covers: {covers}")
-                print(f"   - Holds: {holds}")
-                print(f"Total Orders: {buys + sells + shorts + covers + holds}")
+                print(f"   - Positive Sentiments: {positives}")
+                print(f"   - Negative Sentiments: {negatives}")
+                print(f"   - Neutral Sentiments: {neutrals}")
+                print(f"Total Orders: {positives + negatives + neutrals}")
 
             if res is not None and res == "BANKRUPT":
                 print(f"==========================================")
@@ -171,21 +176,26 @@ def simulate(strategy, download_data=False, external_data=True):
         # print the metrics
         portfolio.visualize_metrics(strategy_name=inst.name)
 
-        # save the positions
-        """
-        try:
-            with open(f'output_portfolios/{strategy.__name__.replace("/", "_")}/positions.json', 'w') as f:
-                json.dump(positions, f)
-        except Exception as e:
-            print(f"Error saving positions: {e}")
-        """
 
+test_set = {
+    "randoms": True,
+    "naives": True,
+    "rsi": True
+}
 
 if __name__ == '__main__':
 
-    # Try the 'Random Long Short Strategy', which is unlikely to produce promising results.
-    simulate(strategy=randoms.RandomLongShortStrategy, download_data=False, external_data=True)
+    # Try the 'Random Long Short Strategy'
+    if test_set["randoms"]:
+        simulate(strategy=randoms.RandomLongShortStrategy, download_data=False, external_data=True)
 
-    # Try the 'Naive Long Short Strategy', which is a simple strategy that buys if the price is higher than the price
-    # 10 days ago, sells if the price is lower than the price 10 days ago, and holds otherwise.
-    # simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True)
+    # Try the 'Naive Long Short Strategy'
+    if test_set["naives"]:
+        simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True, window=15)
+
+    # Try the 'RSI Long Short Strategy'
+    if test_set["rsi"]:
+        simulate(strategy=rsi.RSILongShortStrategy, download_data=False, external_data=True, window=5,
+                 down_threshold=20, up_threshold=99)
+
+    pass

@@ -9,14 +9,12 @@ class RandomLongShortStrategy:
         self.name = 'RandomLongShortStrategy'
         self.description = 'Random long/short strategy. This strategy is used to test the backtesting engine.'
         self.signals = [
-            'buy',
-            'sell',
-            'short',
-            'cover',
-            'hold',
+            'up',
+            'down',
+            'neutral',
         ]
 
-    def generate_signals(self, date, universe, portfolio):
+    def generate_signals(self, date, universe, portfolio, **kwargs):
         signals = {}
         for symbol, _ in universe.items():
             signal = r.choice(self.signals)

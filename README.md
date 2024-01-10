@@ -24,17 +24,18 @@
 # TODO
 
 1. Complete the integration of the portfolio class and relevant methods [X]
-2. Complete the integration of the GPT client []
-3. Complete the integration of the strategies / indicator based ones [ ]
-4. Complete the integration of the strategies / GPT based ones [ ]
-5. Complete the integration of the strategies / machine learning based ones [ ]
-5. Complete the integration of the strategies / deep learning based ones [ ]
-6. Complete the integration of the strategies / reinforcement learning based ones [ ]
-7. Complete the integration of the strategies / alpha-strategy based ones [ ]
-8. Integrate the visualization of the portfolio and metrics [ ]
-9. Integrate the output files and metrics [ ]
-10. Integrate the comparison class [ ]
-11. Write the final report [ ]
+2. Complete the integration of the GPT client [ ..]
+3. Complete the integration of the strategies / indicator based ones [ .]
+4. Complete the integration of the strategies / GPT based ones [ .]
+5. Complete the integration of the strategies / machine learning based ones [ .]
+5. Complete the integration of the strategies / deep learning based ones [ .]
+6. Complete the integration of the strategies / reinforcement learning based ones [ .]
+7. Complete the integration of the strategies / alpha-strategy based ones [ .]
+8. Integrate the visualization of the portfolio and metrics [X]
+9. Integrate the output files and metrics [X]
+10. Integrate the comparison class [ ...]
+11. Extra parameters: Transaction Costs [ ...]
+12. Write the final report [ ....]
 
 **Last updated at:** 2024-01-09 06:42:00 UTC+03:00
 
