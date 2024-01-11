@@ -35,7 +35,7 @@
 9. Integrate the comparison class [X] 
 10. Integrate the main strategy class [X]
 10. Extra parameters: Transaction Costs [X]
-11. Extra parameters: Adjustable Transaction Volume [X.]
+11. Extra parameters: Adjustable Transaction Volume [X]
 12. Django integration for visualization [.]
 12. Write the final report [..]
 
