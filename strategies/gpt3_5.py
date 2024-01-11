@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-class GPT3_5LongShortStrategy:
+class GPT_3_5LongShortStrategy:
     """
     GPT-3.5 long/short strategy.
     """
@@ -9,13 +9,12 @@ class GPT3_5LongShortStrategy:
         self.name = 'GPT3_5LongShortStrategy'
         self.description = 'GPT-3.5 long/short strategy.'
         self.signals = [
-            'long',
-            'short',
+            'up',
+            'down',
             'hold',
         ]
 
-    @staticmethod
-    def evaluate_symbol(date, symbol, dataframe):
+    def evaluate_symbol(self, date, symbol, dataframe):
         return 'hold'
 
     def generate_signals(self, date, universe, portfolio):

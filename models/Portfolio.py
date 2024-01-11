@@ -210,13 +210,14 @@ class Portfolio:
             "bm_cumulative_return": self.bm_cumulative_return,
             "bm_sharpe_ratio": self.bm_sharpe_ratio,
             "bm_initial_value": self.initial_benchmark,
+            "bm_current_value": self.current_benchmark,
         })
 
         return value
 
     def calculate_metrics(self):
         # calculate daily return
-        self.daily_return = self.current_portfolio_value / self.portfolio_history[-1]["portfolio_value"] - 1 if len(self.portfolio_history) != 0 else 0
+        self.daily_return = (self.current_portfolio_value - self.portfolio_history[-1]["portfolio_value"]) / self.portfolio_history[-1]["portfolio_value"] if len(self.portfolio_history) != 0 else 0
         # calculate daily return std
         self.daily_return_std = np.std([x["daily_return"] for x in self.portfolio_history]) if len(self.portfolio_history) != 0 else 0
         # calculate daily excess return
@@ -230,7 +231,9 @@ class Portfolio:
                             max([x["portfolio_value"] for x in self.portfolio_history] if self.portfolio_history != [] else [1])
 
         # calculate benchmark daily return
-        self.bm_daily_return = (self.current_benchmark / self.portfolio_history[-1]["bm_initial_value"]) - 1 if len(self.portfolio_history) != 0 else 0
+        self.bm_daily_return = (((self.current_benchmark -
+                                  self.portfolio_history[-1]["bm_current_value"]) if len(self.portfolio_history) != 0 else 0) /
+                                self.current_benchmark)
         # calculate benchmark daily return std
         self.bm_daily_return_std = np.std([x["bm_daily_return"] for x in self.portfolio_history]) if len(self.portfolio_history) != 0 else 0
         # calculate benchmark daily excess return
@@ -261,9 +264,9 @@ class Portfolio:
 
         # visualize daily return
         plt.plot([x["date"] for x in self.portfolio_history], [x["daily_return"] for x in self.portfolio_history],
-                 label="Daily Return", color="blue")
+                 label="Daily Return")
         plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_return"] for x in self.portfolio_history],
-                 label="Benchmark", color="orange")
+                 label="Benchmark")
         plt.xlabel("Date")
         plt.ylabel("Daily Return")
         plt.xticks(rotation=45)

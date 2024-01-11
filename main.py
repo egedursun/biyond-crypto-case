@@ -1,15 +1,16 @@
 import os
 
+from additional_tests.compare import compare_and_visualize
 from exchange.Exchange import Exchange
 from models.Portfolio import Portfolio
 from scraper.ScraperAgent import ScraperAgent
 import pandas as pd
 
-from strategies import randoms, naives, rsi
+from strategies import randoms, naives, rsi, macd, sma, ema, bollinger, forest, deep_neural, gpt3_5, \
+    gpt_4, alphas
 
 
 class HyperParameters:
-
     class Fund:
         initial_cash = 1_000_000  # initial cash
         risk_free_rate = 0.01  # 1% per annum risk free rate
@@ -19,7 +20,10 @@ class HyperParameters:
         trade_frequency = 1  # Every N days
 
         # TODO: extra parameters --- '''Not Implemented Yet'''
-        transaction_cost = 0.01  # 1% of the transaction volume
+        transaction_cost = 0.01  # N% of the transaction volume
+
+        # TODO: extra parameters --- '''Not Implemented Yet'''
+        transaction_volume_change_aggression = 0  # N% of the transaction volume
 
     class Data:
         universe_size = 5
@@ -84,7 +88,8 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
             # fill the missing dates by back-filling in accordance to the max date
             data = data.bfill(axis=0)
             # get the relevant time period
-            data = data[(data['Date'] >= HyperParameters.Test.start_date) & (data['Date'] <= HyperParameters.Test.end_date)]
+            data = data[
+                (data['Date'] >= HyperParameters.Test.start_date) & (data['Date'] <= HyperParameters.Test.end_date)]
 
             length_days = len(pd.date_range(start=HyperParameters.Test.start_date, end=HyperParameters.Test.end_date))
             if len(data) != length_days:
@@ -122,7 +127,8 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
         exchange = Exchange()
         current_prices = {}
         benchmark = pd.DataFrame(columns=["Date", "Close"])
-        for i, date in enumerate(pd.date_range(start=HyperParameters.Test.start_date, end=HyperParameters.Test.end_date)):
+        for i, date in enumerate(
+                pd.date_range(start=HyperParameters.Test.start_date, end=HyperParameters.Test.end_date)):
             signals = inst.generate_signals(date, universe, portfolio, **kwargs)
 
             if i % HyperParameters.Fund.trade_frequency != 0:
@@ -176,26 +182,125 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
         # print the metrics
         portfolio.visualize_metrics(strategy_name=inst.name)
 
+        # TODO-4: Show the + , 0, - cycles of a sample share in a chart. (e.g. BTC)
+        pass
+
+        # TODO-3: Save the cumulative return in additional_tests/performance_outputs folder & visualize all strategies
+        cumulative_return_history = []
+        for data in portfolio.portfolio_history:
+            cumulative_return_history.append(data['portfolio_value'])
+        return cumulative_return_history
+
 
 test_set = {
     "randoms": True,
     "naives": True,
-    "rsi": True
+    "rsi": True,
+    "macd": True,
+    "sma": True,
+    "ema": True,
+    "bollinger": True,
+    "forest": True,
+    "alphas": {
+        "01": True,
+        "02": True,
+        "03": True,
+        "04": True,
+        "05": True,
+    },
+    "deep_neural": False,
+    "gpt-3.5": False,
+    "gpt-4": False,
 }
 
 if __name__ == '__main__':
 
+    overall_rets = {}
+
     # Try the 'Random Long Short Strategy'
     if test_set["randoms"]:
-        simulate(strategy=randoms.RandomLongShortStrategy, download_data=False, external_data=True)
+        randoms_rets = simulate(strategy=randoms.RandomLongShortStrategy, download_data=False, external_data=True)
+        overall_rets["randoms"] = randoms_rets
 
     # Try the 'Naive Long Short Strategy'
     if test_set["naives"]:
-        simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True, window=15)
+        naives_rets = simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True,
+                               window=15)
+        overall_rets["naives"] = naives_rets
 
     # Try the 'RSI Long Short Strategy'
     if test_set["rsi"]:
-        simulate(strategy=rsi.RSILongShortStrategy, download_data=False, external_data=True, window=5,
-                 down_threshold=20, up_threshold=99)
+        rsi_rets = simulate(strategy=rsi.RSILongShortStrategy, download_data=False, external_data=True, window=10,
+                            down_threshold=30, up_threshold=70)
+        overall_rets["rsi"] = rsi_rets
+
+    # Try the 'MACD Long Short Strategy'
+    if test_set["macd"]:
+        macd_rets = simulate(strategy=macd.MACDLongShortStrategy, download_data=False, external_data=True,
+                             short_window=12,
+                             long_window=26, signal_window=9)
+        overall_rets["macd"] = macd_rets
+
+    # Try the 'SMA Long Short Strategy'
+    if test_set["sma"]:
+        sma_rets = simulate(strategy=sma.SMALongShortStrategy, download_data=False, external_data=True, window=15)
+        overall_rets["sma"] = sma_rets
+
+    # Try the 'EMA Long Short Strategy'
+    if test_set["ema"]:
+        ema_rets = simulate(strategy=ema.EMALongShortStrategy, download_data=False, external_data=True, window=15)
+        overall_rets["ema"] = ema_rets
+
+    # Try the 'Bollinger Bands Long Short Strategy'
+    if test_set["bollinger"]:
+        bollinger_rets = simulate(strategy=bollinger.BollingerLongShortStrategy, download_data=False,
+                                  external_data=True,
+                                  window=20, k=1)
+        overall_rets["bollinger"] = bollinger_rets
+
+    # Try the 'Forest Long Short Strategy'
+    if test_set["forest"]:
+        forest_rets = simulate(strategy=forest.ForestLongShortStrategy, download_data=False, external_data=True,
+                               training_data_limit=20, n_estimators=10)
+        overall_rets["forest"] = forest_rets
+
+    # Try the 'Alphas Long Short Strategies'
+    if test_set["alphas"]["01"]:
+        a01_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+                            cmd="01", window=10, short_period=20, long_period=30)
+        overall_rets["a01"] = a01_rets
+    if test_set["alphas"]["02"]:
+        a02_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+                            cmd="02", window=5, mean_window=10, volume_window=20, z_score_threshold=1.1)
+        overall_rets["a02"] = a02_rets
+    if test_set["alphas"]["03"]:
+        a03_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+                            cmd="03", period=10, momentum_period=5, atr_period=5)
+        overall_rets["a03"] = a03_rets
+    if test_set["alphas"]["04"]:
+        a04_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+                            cmd="04", period=14, fast_period=12, slow_period=26, smooth_period=9)
+        overall_rets["a04"] = a04_rets
+    if test_set["alphas"]["05"]:
+        a05_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+                            cmd="05", period=20, short_period=2, long_period=5, signal_period=3, threshold=1.5)
+        overall_rets["a05"] = a05_rets
+
+    # Try the 'Deep Learning Long Short Strategy'
+    if test_set["deep_neural"]:
+        deep_rets = simulate(strategy=deep_neural.DeepLongShortStrategy, download_data=False, external_data=True,
+                             learning_rate=0.1, epochs=1)
+        overall_rets["deep"] = deep_rets
+
+    # TODO-1: Try the 'GPT-3.5 Long Short Strategy'
+    if test_set["gpt-3.5"]:
+        simulate(strategy=gpt3_5.GPT_3_5LongShortStrategy, download_data=False, external_data=True)
+
+    # TODO-2: Try the 'GPT-4 Long Short Strategy'
+    if test_set["gpt-4"]:
+        simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True)
+
+    # Create the performance comparison chart
+    compare_and_visualize(overall_rets)
 
     pass

@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-class GPT4LongShortStrategy:
+class GPT_4LongShortStrategy:
     """
     GPT-4 long/short strategy.
     """
@@ -9,13 +9,12 @@ class GPT4LongShortStrategy:
         self.name = 'GPT4LongShortStrategy'
         self.description = 'GPT-4 long/short strategy.'
         self.signals = [
-            'long',
-            'short',
+            'up',
+            'down',
             'hold',
         ]
 
-    @staticmethod
-    def evaluate_symbol(date, symbol, dataframe):
+    def evaluate_symbol(self, date, symbol, dataframe):
         return 'hold'
 
     def generate_signals(self, date, universe, portfolio):

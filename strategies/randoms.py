@@ -11,7 +11,7 @@ class RandomLongShortStrategy:
         self.signals = [
             'up',
             'down',
-            'neutral',
+            'hold',
         ]
 
     def generate_signals(self, date, universe, portfolio, **kwargs):

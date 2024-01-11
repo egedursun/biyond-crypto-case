@@ -9,26 +9,19 @@ class RSILongShortStrategy:
         self.name = 'RSILongShortStrategy'
         self.description = 'Relative Strength Index long/short strategy.'
         self.signals = [
-            'long',
-            'short',
+            'up',
+            'down',
             'hold',
         ]
 
-    @staticmethod
-    def evaluate_symbol(date, symbol, dataframe, window=14, down_threshold=30, up_threshold=70):
+    def evaluate_symbol(self, date, symbol, dataframe, window=14, down_threshold=30, up_threshold=70):
         # calculate the RSI for long/short
-
-        signals = {
-            0: 'up',
-            1: 'down',
-            2: 'hold',
-        }
 
         # get the last 14 days of data
         window = int(window)
 
         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
-            return signals[2]
+            return self.signals[2]
 
         # get the last 14 days of data
         last_14_days = dataframe[dataframe['Date'] >= date - pd.Timedelta(days=window)]
@@ -51,14 +44,11 @@ class RSILongShortStrategy:
         relative_strength_index = 100.0 - (100.0 / (1.0 + relative_strength) if (1.0 + relative_strength) != 0 else 0)
 
         if relative_strength_index > up_threshold:
-            # over-valued
-            return signals[1]
+            return self.signals[0]
         elif relative_strength_index < down_threshold:
-            # under-valued
-            return signals[0]
+            return self.signals[1]
         else:
-            # hold
-            return signals[2]
+            return self.signals[2]
 
     def generate_signals(self, date, universe, portfolio, **kwargs):
         signals = {}
