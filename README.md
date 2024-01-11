@@ -8,12 +8,26 @@
 - virtualenv
 - git
 
+---
+
 ## Installation
 
 1. Clone the repository
 2. Create a virtual environment
 3. Install the requirements -> `pip install -r requirements.txt`
 4. Run the application -> `python main.py`
+
+---
+
+## To View the Frontend Admin Panel
+
+1. **Run the Backend Server:** Enter the following command from the main directory of the project:
+`python app.py`
+
+2. **Run Streamlit Server:** Run the following command from the main directory of the project.
+`streamlit run ./Home.py`
+
+---
 
 ## Report
 
@@ -36,10 +50,13 @@
 10. Integrate the main strategy class [X]
 10. Extra parameters: Transaction Costs [X]
 11. Extra parameters: Adjustable Transaction Volume [X]
-12. Django integration for visualization [.]
-12. Write the final report [..]
+12. Streamlit integration for visualization [X]
+13. Integrate written metrics to the Streamlit frontend [.] ~12.01.2024
+14. Integrate hyperparameter adjustment via Streamlit [.] ~12.01.2024
+15. Integrate dynamic function parameters via Streamlit [.] ~12.01.2024
+16. Write the final report [..]  ~13.01.2024
 
 **Started at:** 2024-01-08 22:00:00 UTC+03:00
-**Last updated at:** 2024-01-11 19:01:00 UTC+03:00
+**Last updated at:** 2024-01-12 02:00:00 UTC+03:00
 
 ---
