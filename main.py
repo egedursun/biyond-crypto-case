@@ -300,6 +300,10 @@ if __name__ == '__main__':
     if test_set["gpt-4"]:
         simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True)
 
+    # TODO-5: MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
+    if test_set["main_case"]:
+        simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True)
+
     # Create the performance comparison chart
     compare_and_visualize(overall_rets)
 
