@@ -40,17 +40,17 @@ class Portfolio:
         self.portfolio_history = []
         self.transaction_history = []
 
-    def assign_upward(self, ticker, price, date):
+    def assign_upward(self, ticker, price, date, transaction_cost=0.0):
         r = ""
         if ticker not in self.positions:
             self.positions[ticker] = 0
 
         if self.positions[ticker] > 0:
-            r = self.hold(ticker, price, date)
+            r = self.hold(ticker, price, date, transaction_cost=transaction_cost)
         elif self.positions[ticker] < 0:
-            r = self.cover(ticker, price, date)
+            r = self.cover(ticker, price, date, transaction_cost=transaction_cost)
         elif self.positions[ticker] == 0:
-            r = self.buy(ticker, price, date)
+            r = self.buy(ticker, price, date, transaction_cost=transaction_cost)
         else:
             print("Indescribable action.")
             return r
@@ -59,17 +59,17 @@ class Portfolio:
             return "BANKRUPT"
         return r
 
-    def assign_downward(self, ticker, price, date):
+    def assign_downward(self, ticker, price, date, transaction_cost=0.0):
         r = None
         if ticker not in self.positions:
             self.positions[ticker] = 0
 
         if self.positions.get(ticker, 0) > 0:
-            r = self.sell(ticker, price, date)
+            r = self.sell(ticker, price, date, transaction_cost=transaction_cost)
         elif self.positions[ticker] < 0:
-            r = self.hold(ticker, price, date)
+            r = self.hold(ticker, price, date, transaction_cost=transaction_cost)
         elif self.positions[ticker] == 0:
-            r = self.short(ticker, price, date)
+            r = self.short(ticker, price, date, transaction_cost=transaction_cost)
         else:
             print("Indescribable action.")
             return r
@@ -78,13 +78,13 @@ class Portfolio:
             return r
         return r
 
-    def assign_hold(self, ticker, price, date):
+    def assign_hold(self, ticker, price, date, transaction_cost=0.0):
         r = self.hold(ticker, price, date)
         if r is not None and type(r) == str and r == "BANKRUPT":
             return r
         return r
 
-    def hold(self, ticker, price, date):
+    def hold(self, ticker, price, date, transaction_cost=0.0):
         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
             return "BANKRUPT"
 
@@ -97,13 +97,13 @@ class Portfolio:
             "total_cost": 0,
         })
 
-    def buy(self, ticker, price, date):
+    def buy(self, ticker, price, date, transaction_cost=0.0):
         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
             return "BANKRUPT"
 
         cost = price * self.transaction_quantity
         if cost <= self.cash:
-            self.cash -= cost
+            self.cash -= cost + (cost * transaction_cost)
             self.positions[ticker] = self.positions.get(ticker, 0) + self.transaction_quantity
 
             self.transaction_history.append({
@@ -117,13 +117,13 @@ class Portfolio:
         else:
             self.hold(ticker, price, date)
 
-    def sell(self, ticker, price, date):
+    def sell(self, ticker, price, date, transaction_cost=0.0):
         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
             return "BANKRUPT"
 
         if self.positions.get(ticker, 0) >= self.transaction_quantity:
             self.positions[ticker] -= self.transaction_quantity
-            self.cash += price * self.transaction_quantity
+            self.cash += (price * self.transaction_quantity) - (price * self.transaction_quantity * transaction_cost)
 
             self.transaction_history.append({
                 "date": date,
@@ -136,12 +136,12 @@ class Portfolio:
         else:
             self.short(ticker, price, date)
 
-    def short(self, ticker, price, date):
+    def short(self, ticker, price, date, transaction_cost=0.0):
         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
             return "BANKRUPT"
 
         self.positions[ticker] = self.positions.get(ticker, 0) - self.transaction_quantity
-        self.cash += price * self.transaction_quantity
+        self.cash += (price * self.transaction_quantity) - (price * self.transaction_quantity * transaction_cost)
 
         self.transaction_history.append({
             "date": date,
@@ -152,13 +152,13 @@ class Portfolio:
             "total_cost": price * self.transaction_quantity,
         })
 
-    def cover(self, ticker, price, date):
+    def cover(self, ticker, price, date, transaction_cost=0.0):
         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
             return "BANKRUPT"
 
         if self.positions.get(ticker, 0) <= -self.transaction_quantity:
             self.positions[ticker] += self.transaction_quantity
-            self.cash -= price * self.transaction_quantity
+            self.cash -= (price * self.transaction_quantity) + (price * self.transaction_quantity * transaction_cost)
 
             self.transaction_history.append({
                 "date": date,
@@ -250,9 +250,12 @@ class Portfolio:
             os.makedirs("results/" + strategy_name)
 
         # visualize portfolio value, cash and asset value together
-        plt.plot([x["date"] for x in self.portfolio_history], [x["portfolio_value"] for x in self.portfolio_history], label="Portfolio Value")
-        plt.plot([x["date"] for x in self.portfolio_history], [x["cash"] for x in self.portfolio_history], label="Cash")
-        plt.plot([x["date"] for x in self.portfolio_history], [x["asset_value"] for x in self.portfolio_history], label="Asset Value")
+        plt.plot([x["date"] for x in self.portfolio_history], [x["portfolio_value"] for x in self.portfolio_history],
+                 label="Portfolio Value")
+        plt.plot([x["date"] for x in self.portfolio_history], [x["cash"] for x in self.portfolio_history],
+                 label="Cash")
+        plt.plot([x["date"] for x in self.portfolio_history], [x["asset_value"] for x in self.portfolio_history],
+                 label="Asset Value")
         plt.xlabel("Date")
         plt.ylabel("Value ($)")
         plt.xticks(rotation=45)

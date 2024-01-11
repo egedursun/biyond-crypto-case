@@ -7,7 +7,8 @@ class Exchange:
         pass
 
     @staticmethod
-    def execute_orders(date, universe, portfolio: Portfolio, current_benchmark: list, orders: dict, current_prices: dict):
+    def execute_orders(date, universe, portfolio: Portfolio, current_benchmark: list, orders: dict, current_prices: dict,
+                       transaction_cost=0.0):
         portfolio.portfolio_value(current_prices=current_prices, benchmark=current_benchmark, date=date)
 
         r = ""
@@ -18,13 +19,13 @@ class Exchange:
             # get the price on the date, which is an index
             current_price = current_prices[symbol]
             if sentiment == 'up':
-                r = portfolio.assign_upward(symbol, current_price, date)
+                r = portfolio.assign_upward(symbol, current_price, date, transaction_cost=transaction_cost)
                 positives += 1
             elif sentiment == 'down':
-                r = portfolio.assign_downward(symbol, current_price, date)
+                r = portfolio.assign_downward(symbol, current_price, date, transaction_cost=transaction_cost)
                 negatives += 1
             elif sentiment == 'hold':
-                r = portfolio.assign_hold(symbol, current_price, date)
+                r = portfolio.assign_hold(symbol, current_price, date, transaction_cost=transaction_cost)
                 neutrals += 1
             else:
                 print(f"Unknown sentiment: {sentiment} for symbol {symbol}")

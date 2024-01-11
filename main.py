@@ -1,4 +1,5 @@
 import os
+import copy as cp
 
 from additional_tests.compare import compare_and_visualize, visualize_stock_positions
 from exchange.Exchange import Exchange
@@ -7,7 +8,7 @@ from scraper.ScraperAgent import ScraperAgent
 import pandas as pd
 
 from strategies import randoms, naives, rsi, macd, sma, ema, bollinger, forest, deep_neural, gpt3_5, \
-    gpt_4, alphas
+    gpt_4, alphas, main_case
 
 
 class HyperParameters:
@@ -18,9 +19,9 @@ class HyperParameters:
 
         transaction_volume = 10  # N of shares per transaction
         trade_frequency = 1  # Every N days
+        gpt_trade_frequency = 15  # Every N days for GPT requests
 
-        # TODO: extra parameters --- '''Not Implemented Yet'''
-        transaction_cost = 0.01  # N% of the transaction volume
+        transaction_cost = 0.002  # N% of the transaction volume
 
         # TODO: extra parameters --- '''Not Implemented Yet'''
         transaction_volume_change_aggression = 0  # N% of the transaction volume
@@ -127,12 +128,18 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
         exchange = Exchange()
         current_prices = {}
         benchmark = pd.DataFrame(columns=["Date", "Close"])
+        p_values = []
         for i, date in enumerate(
                 pd.date_range(start=HyperParameters.Test.start_date, end=HyperParameters.Test.end_date)):
             signals = inst.generate_signals(date, universe, portfolio, **kwargs)
 
             if i % HyperParameters.Fund.trade_frequency != 0:
                 # print(f"Skipping trade on {date}")
+                continue
+
+            if i % HyperParameters.Fund.gpt_trade_frequency != 0 and inst.name in ["GPT3_5LongShortStrategy",
+                                                                                   "GPT4LongShortStrategy"]:
+                # print(f"Skipping GPT trade on {date}")
                 continue
 
             # current prices
@@ -149,7 +156,8 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
                                   ignore_index=True)
 
             # run the orders
-            portfolio, res = exchange.execute_orders(date, universe, portfolio, average_close, signals, current_prices)
+            portfolio, res = exchange.execute_orders(date, universe, portfolio, average_close, signals, current_prices,
+                                                     HyperParameters.Fund.transaction_cost)
 
             positives = 0
             negatives = 0
@@ -179,11 +187,12 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
                 print(f"==========================================")
                 break
 
+            p_values.append(cp.deepcopy(portfolio.positions))
+
         # print the metrics
         portfolio.visualize_metrics(strategy_name=inst.name)
 
-        # TODO-4: Show the + , 0, - cycles of a sample share in a chart. (e.g. BTC)
-        visualize_stock_positions(portfolio.portfolio_history, limit=1)
+        visualize_stock_positions(p_values, smoothen_days=20)
 
         # TODO-3: Save the cumulative return in additional_tests/performance_outputs folder & visualize all strategies
         cumulative_return_history = []
@@ -193,24 +202,25 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
 
 
 test_set = {
-    "randoms": True,
-    "naives": True,
-    "rsi": True,
-    "macd": True,
-    "sma": True,
-    "ema": True,
-    "bollinger": True,
-    "forest": True,
+    "randoms": False,
+    "naives": False,
+    "rsi": False,
+    "macd": False,
+    "sma": False,
+    "ema": False,
+    "bollinger": False,
+    "forest": False,
     "alphas": {
-        "01": True,
-        "02": True,
-        "03": True,
-        "04": True,
-        "05": True,
+        "01": False,
+        "02": False,
+        "03": False,
+        "04": False,
+        "05": False,
     },
     "deep_neural": False,
     "gpt-3.5": False,
     "gpt-4": False,
+    "main_case": True,
 }
 
 if __name__ == '__main__':
@@ -227,6 +237,8 @@ if __name__ == '__main__':
         naives_rets = simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True,
                                window=15)
         overall_rets["naives"] = naives_rets
+
+        compare_and_visualize(overall_rets)
 
     # Try the 'RSI Long Short Strategy'
     if test_set["rsi"]:
@@ -292,17 +304,22 @@ if __name__ == '__main__':
                              learning_rate=0.1, epochs=1)
         overall_rets["deep"] = deep_rets
 
-    # TODO-1: Try the 'GPT-3.5 Long Short Strategy'
+    # Try the 'GPT-3.5 Long Short Strategy'
     if test_set["gpt-3.5"]:
-        simulate(strategy=gpt3_5.GPT_3_5LongShortStrategy, download_data=False, external_data=True)
+        simulate(strategy=gpt3_5.GPT_3_5LongShortStrategy, download_data=False, external_data=True,
+                 hard_limit=1, lookback_limit=5)
 
-    # TODO-2: Try the 'GPT-4 Long Short Strategy'
+    # Try the 'GPT-4 Long Short Strategy'
     if test_set["gpt-4"]:
-        simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True)
+        simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True,
+                 hard_limit=1, lookback_limit=5)
 
-    # TODO-5: MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
+    # MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
     if test_set["main_case"]:
-        simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True)
+        simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True,
+                 macd_short_window=12, macd_long_window=26, macd_signal_window=9,
+                 atr_window=14, volatility_threshold=0.1, macd_threshold=0.1, oc_diff_threshold=0.1,
+                 hl_diff_threshold=0.1)
 
     # Create the performance comparison chart
     compare_and_visualize(overall_rets)
