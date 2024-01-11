@@ -16,6 +16,9 @@ class ForestLongShortStrategy:
         self.classifier = None
 
     def evaluate_symbol(self, date, symbol, dataframe, training_data_limit=20, n_estimators=10):
+        if not date - pd.Timedelta(days=training_data_limit) in dataframe['Date'].values:
+            return self.signals[2]
+
         dataframe = dataframe.copy()
         dataframe = dataframe[dataframe['Date'] < date]
 

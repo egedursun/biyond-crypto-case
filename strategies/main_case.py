@@ -27,8 +27,8 @@ class MainLongShortStrategy:
                         volatility_threshold=0.001,
                         macd_threshold=0.05,
 
-                        oc_diff_threshold=0.05,
-                        hl_diff_threshold=0.05):
+                        oc_diff_threshold=0.01,
+                        hl_diff_threshold=0.01):
 
         if not date - pd.Timedelta(days=1) in dataframe['Date'].values:
             return self.signals[2]

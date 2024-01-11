@@ -4,6 +4,7 @@ import copy as cp
 from additional_tests.compare import compare_and_visualize, visualize_stock_positions
 from exchange.Exchange import Exchange
 from models.Portfolio import Portfolio
+from risk import RiskToleranceManager
 from scraper.ScraperAgent import ScraperAgent
 import pandas as pd
 
@@ -17,14 +18,16 @@ class HyperParameters:
         risk_free_rate = 0.01  # 1% per annum risk free rate
         safety_margin = 5  # 500% of the initial cash
 
-        transaction_volume = 10  # N of shares per transaction
+        transaction_volume = 80  # N of shares per transaction
         trade_frequency = 1  # Every N days
         gpt_trade_frequency = 15  # Every N days for GPT requests
 
         transaction_cost = 0.002  # N% of the transaction volume
 
-        # TODO: extra parameters --- '''Not Implemented Yet'''
-        transaction_volume_change_aggression = 0  # N% of the transaction volume
+        transaction_volume_change_aggression = 0.05  # N% of the transaction volume --- 0 means no change
+        transaction_volume_adjustment_window = 20  # N days
+        transaction_volume_minimum = 10  # min N of shares per transaction
+        transaction_volume_maximum = 150  # max N of shares per transaction
 
     class Data:
         universe_size = 5
@@ -150,14 +153,17 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
             current_prices_list = []
             for symbol, dictionary in current_prices.items():
                 current_prices_list.append(dictionary)
-            average_close = sum(current_prices_list) / len(current_prices_list)
+            average_close = (sum(current_prices_list) / len(current_prices_list))
             # add the average close to the benchmark
             benchmark = pd.concat([benchmark, pd.DataFrame([[date, average_close]], columns=["Date", "Close"])],
                                   ignore_index=True)
-
             # run the orders
             portfolio, res = exchange.execute_orders(date, universe, portfolio, average_close, signals, current_prices,
-                                                     HyperParameters.Fund.transaction_cost)
+                                                     HyperParameters.Fund.transaction_cost,
+                                                     HyperParameters.Fund.transaction_volume_change_aggression,
+                                                     HyperParameters.Fund.transaction_volume_adjustment_window,
+                                                     HyperParameters.Fund.transaction_volume_minimum,
+                                                     HyperParameters.Fund.transaction_volume_maximum)
 
             positives = 0
             negatives = 0
@@ -204,7 +210,7 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
 test_set = {
     "randoms": False,
     "naives": False,
-    "rsi": False,
+    "rsi": True,
     "macd": False,
     "sma": False,
     "ema": False,
@@ -220,7 +226,7 @@ test_set = {
     "deep_neural": False,
     "gpt-3.5": False,
     "gpt-4": False,
-    "main_case": True,
+    "main_case": False,
 }
 
 if __name__ == '__main__':
@@ -237,8 +243,6 @@ if __name__ == '__main__':
         naives_rets = simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True,
                                window=15)
         overall_rets["naives"] = naives_rets
-
-        compare_and_visualize(overall_rets)
 
     # Try the 'RSI Long Short Strategy'
     if test_set["rsi"]:
@@ -306,20 +310,23 @@ if __name__ == '__main__':
 
     # Try the 'GPT-3.5 Long Short Strategy'
     if test_set["gpt-3.5"]:
-        simulate(strategy=gpt3_5.GPT_3_5LongShortStrategy, download_data=False, external_data=True,
-                 hard_limit=1, lookback_limit=5)
+        gpt3_rets = simulate(strategy=gpt3_5.GPT_3_5LongShortStrategy, download_data=False, external_data=True,
+                             hard_limit=1, lookback_limit=5)
+        overall_rets["gpt-3.5"] = gpt3_rets
 
     # Try the 'GPT-4 Long Short Strategy'
     if test_set["gpt-4"]:
-        simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True,
-                 hard_limit=1, lookback_limit=5)
+        gpt4_rets = simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True,
+                             hard_limit=1, lookback_limit=5)
+        overall_rets["gpt-4"] = gpt4_rets
 
     # MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
     if test_set["main_case"]:
-        simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True,
-                 macd_short_window=12, macd_long_window=26, macd_signal_window=9,
-                 atr_window=14, volatility_threshold=0.1, macd_threshold=0.1, oc_diff_threshold=0.1,
-                 hl_diff_threshold=0.1)
+        main_rets = simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True,
+                             macd_short_window=12, macd_long_window=26, macd_signal_window=9,
+                             atr_window=14, volatility_threshold=0.1, macd_threshold=0.1, oc_diff_threshold=0.1,
+                             hl_diff_threshold=0.1)
+        overall_rets["main_case"] = main_rets
 
     # Create the performance comparison chart
     compare_and_visualize(overall_rets)

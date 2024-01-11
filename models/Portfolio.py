@@ -1,8 +1,11 @@
+import math
 import os
 
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+
+from risk import RiskToleranceManager
 
 # TRADE_DAYS_IN_YEAR = 252
 TRADE_DAYS_IN_YEAR = 365
@@ -40,10 +43,27 @@ class Portfolio:
         self.portfolio_history = []
         self.transaction_history = []
 
-    def assign_upward(self, ticker, price, date, transaction_cost=0.0):
+    def assign_upward(self, ticker, price, date, transaction_cost=0.0, risk_tolerance=0.0,
+                      returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=100):
         r = ""
         if ticker not in self.positions:
             self.positions[ticker] = 0
+
+        # transaction adjustment
+        new_quantity = RiskToleranceManager.adjust_transaction_volume(
+            portfolio_value=self.current_portfolio_value,
+            initial_portfolio_value=self.initial_cash,
+            cash=self.cash,
+            initial_cash=self.initial_cash,
+            current_transaction_volume=self.transaction_quantity,
+            daily_returns=[x["daily_return"] for x in self.portfolio_history],
+            risk_tolerance=risk_tolerance,
+            returns_window=returns_window,
+            minimum_transaction_volume=minimum_transaction_volume,
+            maximum_transaction_volume=maximum_transaction_volume
+        )
+        if self.transaction_quantity != new_quantity:
+            self.transaction_quantity = new_quantity
 
         if self.positions[ticker] > 0:
             r = self.hold(ticker, price, date, transaction_cost=transaction_cost)
@@ -59,10 +79,27 @@ class Portfolio:
             return "BANKRUPT"
         return r
 
-    def assign_downward(self, ticker, price, date, transaction_cost=0.0):
+    def assign_downward(self, ticker, price, date, transaction_cost=0.0, risk_tolerance=0.0,
+                        returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=100):
         r = None
         if ticker not in self.positions:
             self.positions[ticker] = 0
+
+        # transaction adjustment
+        new_quantity = RiskToleranceManager.adjust_transaction_volume(
+            portfolio_value=self.current_portfolio_value,
+            initial_portfolio_value=self.initial_cash,
+            cash=self.cash,
+            initial_cash=self.initial_cash,
+            current_transaction_volume=self.transaction_quantity,
+            daily_returns=[x["daily_return"] for x in self.portfolio_history],
+            risk_tolerance=risk_tolerance,
+            returns_window=returns_window,
+            minimum_transaction_volume=minimum_transaction_volume,
+            maximum_transaction_volume=maximum_transaction_volume
+        )
+        if self.transaction_quantity != new_quantity:
+            self.transaction_quantity = new_quantity
 
         if self.positions.get(ticker, 0) > 0:
             r = self.sell(ticker, price, date, transaction_cost=transaction_cost)
@@ -78,10 +115,28 @@ class Portfolio:
             return r
         return r
 
-    def assign_hold(self, ticker, price, date, transaction_cost=0.0):
+    def assign_hold(self, ticker, price, date, transaction_cost=0.0, risk_tolerance=0.0,
+                    returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=100):
         r = self.hold(ticker, price, date)
         if r is not None and type(r) == str and r == "BANKRUPT":
             return r
+
+        # transaction adjustment
+        new_quantity = RiskToleranceManager.adjust_transaction_volume(
+            portfolio_value=self.current_portfolio_value,
+            initial_portfolio_value=self.initial_cash,
+            cash=self.cash,
+            initial_cash=self.initial_cash,
+            current_transaction_volume=self.transaction_quantity,
+            daily_returns=[x["daily_return"] for x in self.portfolio_history],
+            risk_tolerance=risk_tolerance,
+            returns_window=returns_window,
+            minimum_transaction_volume=minimum_transaction_volume,
+            maximum_transaction_volume=maximum_transaction_volume
+        )
+        if self.transaction_quantity != new_quantity:
+            self.transaction_quantity = new_quantity
+
         return r
 
     def hold(self, ticker, price, date, transaction_cost=0.0):
@@ -180,7 +235,7 @@ class Portfolio:
         self.current_asset_value = value - self.cash
 
         # update benchmark
-        self.current_benchmark = benchmark
+        self.current_benchmark = benchmark / len(current_prices)
 
         # calculate metrics
         self.calculate_metrics()
@@ -244,6 +299,8 @@ class Portfolio:
         self.bm_sharpe_ratio = self.bm_daily_excess_return / self.bm_daily_return_std if self.bm_daily_return_std != 0 else 0
 
     def visualize_metrics(self, strategy_name):
+        adj = 6
+        adj_number_of_assets = len(self.portfolio_history[0]["positions"]) / adj
 
         # create output directory if not exists
         if not os.path.exists("results/" + strategy_name):
@@ -268,7 +325,7 @@ class Portfolio:
         # visualize daily return
         plt.plot([x["date"] for x in self.portfolio_history], [x["daily_return"] for x in self.portfolio_history],
                  label="Daily Return")
-        plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_return"] for x in self.portfolio_history],
+        plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_return"]/adj_number_of_assets  for x in self.portfolio_history],
                  label="Benchmark")
         plt.xlabel("Date")
         plt.ylabel("Daily Return")
@@ -296,7 +353,7 @@ class Portfolio:
         # visualize daily excess return
         plt.plot([x["date"] for x in self.portfolio_history], [x["daily_excess_return"] for x in self.portfolio_history],
                  label="Daily Excess Return")
-        plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_excess_return"] for x in self.portfolio_history],
+        plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_excess_return"]/adj_number_of_assets for x in self.portfolio_history],
                  label="Benchmark")
         plt.xlabel("Date")
         plt.ylabel("Daily Excess Return")
@@ -308,9 +365,11 @@ class Portfolio:
         plt.clf()
 
         # visualize cumulative return
-        plt.plot([x["date"] for x in self.portfolio_history], [x["cumulative_return"] for x in self.portfolio_history],
+        plt.plot([x["date"] for x in self.portfolio_history], [x["cumulative_return"] for x in
+                                                               self.portfolio_history],
                  label="Cumulative Return")
-        plt.plot([x["date"] for x in self.portfolio_history], [x["bm_cumulative_return"] for x in self.portfolio_history],
+        plt.plot([x["date"] for x in self.portfolio_history], [x["bm_cumulative_return"]/adj_number_of_assets for x in
+                                                               self.portfolio_history],
                  label="Benchmark")
         plt.xlabel("Date")
         plt.ylabel("Cumulative Return")
