@@ -1,6 +1,6 @@
 import os
 
-from additional_tests.compare import compare_and_visualize
+from additional_tests.compare import compare_and_visualize, visualize_stock_positions
 from exchange.Exchange import Exchange
 from models.Portfolio import Portfolio
 from scraper.ScraperAgent import ScraperAgent
@@ -183,7 +183,7 @@ def simulate(strategy, download_data=False, external_data=True, **kwargs):
         portfolio.visualize_metrics(strategy_name=inst.name)
 
         # TODO-4: Show the + , 0, - cycles of a sample share in a chart. (e.g. BTC)
-        pass
+        visualize_stock_positions(portfolio.portfolio_history, limit=1)
 
         # TODO-3: Save the cumulative return in additional_tests/performance_outputs folder & visualize all strategies
         cumulative_return_history = []
