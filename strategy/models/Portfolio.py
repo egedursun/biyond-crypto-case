@@ -261,6 +261,27 @@ class Portfolio:
         self.bm_sharpe_ratio = self.bm_daily_excess_return / self.bm_daily_return_std if self.bm_daily_return_std != 0 else 0
 
     def visualize_metrics(self, strategy_name):
+
+        # save metrics to files
+        if not os.path.exists("strategy/records/" + strategy_name):
+            os.makedirs("strategy/records/" + strategy_name)
+
+        # calculate average daily return
+        average_daily_return = sum([x["daily_return"] for x in self.portfolio_history]) / len(self.portfolio_history)
+        average_daily_return_std = np.std([x["daily_return"] for x in self.portfolio_history])
+        average_daily_excess_return = sum([x["daily_excess_return"] for x in self.portfolio_history]) / len(self.portfolio_history)
+        f_cumulative_return = self.portfolio_history[-1]["cumulative_return"]
+        average_sharpe_ratio = sum([x["sharpe_ratio"] for x in self.portfolio_history]) / len(self.portfolio_history)
+        f_maximum_drawdown = self.portfolio_history[-1]["max_drawdown"]
+
+        with open("strategy/records/" + strategy_name + "/metrics.txt", "w") as f:
+            f.write("**Cumulative Return:** " + str(f_cumulative_return) + "\n")
+            f.write("**Average Daily Return:** " + str(average_daily_return) + "\n")
+            f.write("**Average Daily Excess Return:** " + str(average_daily_excess_return) + "\n")
+            f.write("**Average Daily Return Standard Deviation:** " + str(average_daily_return_std) + "\n")
+            f.write("**Sharpe Ratio:** " + str(average_sharpe_ratio) + "\n")
+            f.write("**Maximum Drawdown:** " + str(f_maximum_drawdown) + "\n")
+
         adj = 6
         adj_number_of_assets = len(self.portfolio_history[0]["positions"]) / adj
         if not os.path.exists("strategy/results/" + strategy_name):

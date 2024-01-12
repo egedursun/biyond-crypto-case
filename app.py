@@ -42,27 +42,27 @@ def strategies_list():
 
 @app.get('/api/v1/strategies/<string:strategy_id>')
 def strategies_get(strategy_id):
-    return jsonify(handle_get_configuration(request, strategy_id))
+    return handle_get_configuration(request, strategy_id)
 
 
 @app.patch('/api/v1/strategies/<string:strategy_id>')
 def strategies_update(strategy_id):
-    return jsonify(handle_update_configuration(request, strategy_id))
+    return handle_update_configuration(request, strategy_id)
 
 
 @app.delete('/api/v1/strategies/<string:strategy_id>')
 def strategies_delete(strategy_id):
-    return jsonify(handle_delete_configuration(request, strategy_id))
+    return handle_delete_configuration(request, strategy_id)
 
 
 ###############################################################################
 # RUN MODEL SIMULATION(S)
 ###############################################################################
 
-@app.post('/api/v1/simulations/with_configuration/<string:strategy_id>')
-def run_simulation(strategy_id):
+@app.post('/api/v1/simulations/with_configuration')
+def run_simulation():
     # retrieve the strategy
-    strategy = handle_get_configuration(request, strategy_id)
+    strategy = handle_get_configuration(request, 1)
     if strategy['data'] == {}:
         return jsonify({'message': 'Strategy not found.'}), 404
     # run the simulation

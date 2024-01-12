@@ -114,5 +114,6 @@ if __name__ == '__main__':
     ##########################################
 
     # request POST
-    response = requests.post(f'http://0.0.0.0:5000/api/v1/simulations/with_configuration/{id_p}')
+    response = requests.post(f'http://0.0.0.0:5000/api/v1/simulations/with_configuration')
+    print(response.json())
     print("All tests passed, success.")

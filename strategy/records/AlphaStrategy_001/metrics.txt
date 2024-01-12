@@ -1,0 +1,6 @@
+Cumulative Return: -0.03221206618567929
+Average Daily Return: -1.636205759323744e-05
+Average Daily Excess Return: -0.01371499219457954
+Average Daily Return Standard Deviation: 0.012074938889436747
+Sharpe Ratio: -3.164263381065015
+Maximum Drawdown: 970551.7986277421

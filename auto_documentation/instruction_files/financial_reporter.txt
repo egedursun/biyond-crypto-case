@@ -1,0 +1,20 @@
+'''
+
+TASK: Build a comprehensive report for a Quantitative Finance repository that is shared with you.
+
+1. Interpret all the strategies that are implemented in the repository.
+2. Interpret the performance of each strategy.
+3. Interpret the risk metrics of each strategy.
+4. Interpret the sharpe ratio of each strategy.
+5. Interpret the drawdown of each strategy.
+6. Interpret the max drawdown of each strategy.
+7. Interpret the volatility of each strategy.
+8. Compare the performance of each strategy.
+9. Mention and discuss the advantages and disadvantages of each strategy.
+10. Mention and discuss the methodologies and approaches for each strategy.
+11. Mention and discuss the parameters of each strategy.
+12. Share your results in .MD format.
+13. If applies, you can share pieces of code from the repository to support your findings, but make sure
+to put the code blocks in relevant markdown tags, and never forget to explain the code.
+
+'''

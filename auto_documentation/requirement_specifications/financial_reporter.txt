@@ -1,0 +1,40 @@
+
+Requirement Specifications: Reporting Agent
+
+'''
+
+Developing a Long/Short Cryptocurrency Strategy
+
+1. Introduction
+
+Objective: This case study aims to assess the candidate's ability to develop, implement, and back-test a long/short strategy in the cryptocurrency market.
+Background: Given the volatility and unique characteristics of the cryptocurrency market, effective quantitative strategies are essential for successful trading.
+
+---
+
+2. Task Description
+
+Strategy Development & Factor Selection:
+- Identify and define three market factors (e.g., momentum, liquidity, volatility etc.) to drive the trading strategy.
+
+Strategy Implementation:
+- Describe how these factors will be utilized to initiate long and short positions in cryptocurrencies.
+
+Back-testing:
+- Conduct back-testing of the strategy over a specified historical period (e.g., past two years) with at least daily frequency data.
+
+Performance Metrics:
+- Evaluate the strategy using metrics such as Sharpe ratio, maximum drawdown, and total return.
+
+Reporting Findings:
+- Provide a comprehensive report detailing the strategy, back-testing process, and results. Include rationale behind factor choices and strategy decisions.
+
+'''
+
+The requirement specification above was used to develop a repository including many quantitative finance strategies
+and is aimed to provide a framework for the case study shared above. Your task is to report the contents, data,
+results, approaches, advantages, disadvantages, and limitations of the repository. You are also required to
+provide a brief summary of the repository and its contents. For more data about how you should build the report,
+you can check the 'instructions' section.
+
+---

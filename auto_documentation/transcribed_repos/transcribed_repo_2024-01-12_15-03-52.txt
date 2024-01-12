@@ -1,0 +1,2566 @@
+========================================METADATAPath: strategy/strategy_interface.py
+File: strategy/strategy_interface.py
+Size: 14750
+Last modified: 1705009060.1159327
+Last accessed: 1705009061.703616
+Created: 1705009060.1159327
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import os
+1 | import copy as cp
+2 | 
+3 | from strategy.additional_tests.compare import compare_and_visualize, visualize_stock_positions
+4 | from strategy.exchange.Exchange import Exchange
+5 | from strategy.models.HyperParameters import HyperParameters
+6 | from strategy.models.Portfolio import Portfolio
+7 | from strategy.scraper.ScraperAgent import ScraperAgent
+8 | import pandas as pd
+9 | 
+10 | from strategy.strategies import rsi, macd, forest, randoms, deep_neural, main_case, bollinger, gpt_4, alphas, gpt3_5, \
+11 |     ema, naives, sma
+12 | 
+13 | 
+14 | def simulate(strategy, download_data=False, external_data=True, hyper_parameters=None, **kwargs):
+15 |     if hyper_parameters is None:
+16 |         hyper_parameters = HyperParameters
+17 | 
+18 |     if download_data:
+19 |         while hyper_parameters.Data.universe_size > len(hyper_parameters.Data.symbols):
+20 |             # take samples from csv
+21 |             df = pd.read_csv('strategy/data/metadata/coins_metadata.csv')
+22 |             for i in range(hyper_parameters.Data.universe_size):
+23 |                 hyper_parameters.Data.symbols.append(df['symbol'][i])
+24 | 
+25 |             count_success_train = ScraperAgent(
+26 |                 hyper_parameters.Data.symbols,
+27 |                 hyper_parameters.Train.start_date,
+28 |                 hyper_parameters.Train.end_date).download_price_data(is_training_data=True)
+29 |             count_success_test = ScraperAgent(
+30 |                 hyper_parameters.Data.symbols,
+31 |                 hyper_parameters.Test.start_date,
+32 |                 hyper_parameters.Test.end_date).download_price_data(is_training_data=False)
+33 | 
+34 |             if count_success_train < hyper_parameters.Data.universe_size or \
+35 |                     count_success_test < hyper_parameters.Data.universe_size or \
+36 |                     len(os.listdir('strategy/data/train')) < hyper_parameters.Data.universe_size or \
+37 |                     len(os.listdir('strategy/data/test')) < hyper_parameters.Data.universe_size:
+38 |                 print(f'[WARNING] Not enough data was found, retrying the process again...')
+39 |                 hyper_parameters.Data.symbols = []
+40 |                 for file in os.listdir('strategy/data/train'):
+41 |                     os.remove(f'strategy/data/train/{file}')
+42 |                 for file in os.listdir('strategy/data/test'):
+43 |                     os.remove(f'strategy/data/test/{file}')
+44 |                 continue
+45 |             print(f'[SUCCESS] Successfully downloaded {hyper_parameters.Data.universe_size} instruments...')
+46 | 
+47 |     if external_data:
+48 |         universe = {
+49 |             # 'symbol': pd.DataFrame
+50 |         }
+51 | 
+52 |         for file_name in os.listdir('strategy/data/external'):
+53 |             data = pd.read_csv(f'strategy/data/external/{file_name}')
+54 |             if "Date" not in data.columns:
+55 |                 print(f'[ERROR] Date column not found in {file_name}')
+56 |                 continue
+57 |             data = data.bfill(axis=0)
+58 |             data = data[
+59 |                 (data['Date'] >= hyper_parameters.Test.start_date) & (data['Date'] <= hyper_parameters.Test.end_date)]
+60 | 
+61 |             length_days = len(pd.date_range(start=hyper_parameters.Test.start_date, end=hyper_parameters.Test.end_date))
+62 |             if len(data) != length_days:
+63 |                 continue
+64 |             universe[file_name[:-4].replace(" ", "_")] = data
+65 | 
+66 |         for symbol, dataframe in universe.items():
+67 |             dataframe['Date'] = pd.to_datetime(dataframe['Date'])
+68 |             full_date_range = pd.date_range(start=hyper_parameters.Test.start_date, end=hyper_parameters.Test.end_date)
+69 |             dataframe = dataframe.set_index('Date').reindex(full_date_range, fill_value=None).reset_index()
+70 |             dataframe.rename(columns={'index': 'Date'}, inplace=True)
+71 |             dataframe.sort_values('Date', inplace=True)
+72 |             dataframe.reset_index(drop=True, inplace=True)
+73 | 
+74 |         for symbol, dataframe in universe.items():
+75 |             dataframe.drop_duplicates(subset=['Date'], keep='first', inplace=True)
+76 |             dataframe.reset_index(drop=True, inplace=True)
+77 | 
+78 |         ################################################################################################################
+79 |         # Run the strategy
+80 |         ################################################################################################################
+81 |         portfolio = Portfolio(
+82 |             hyper_parameters.Fund.initial_cash,
+83 |             hyper_parameters.Fund.transaction_volume,
+84 |             hyper_parameters.Fund.risk_free_rate,
+85 |             hyper_parameters.Fund.safety_margin)
+86 | 
+87 |         inst = strategy()
+88 |         exchange = Exchange()
+89 |         current_prices = {}
+90 |         benchmark = pd.DataFrame(columns=["Date", "Close"])
+91 |         p_values = []
+92 |         for i, date in enumerate(
+93 |                 pd.date_range(start=hyper_parameters.Test.start_date, end=hyper_parameters.Test.end_date)):
+94 |             signals = inst.generate_signals(date, universe, portfolio, **kwargs)
+95 | 
+96 |             if i % hyper_parameters.Fund.trade_frequency != 0:
+97 |                 continue
+98 | 
+99 |             if i % hyper_parameters.Fund.gpt_trade_frequency != 0 and inst.name in ["GPT3_5LongShortStrategy",
+100 |                                                                                     "GPT4LongShortStrategy"]:
+101 |                 continue
+102 | 
+103 |             # current prices
+104 |             for symbol, dataframe in universe.items():
+105 |                 current_prices[symbol] = dataframe[dataframe['Date'] == date]['Close'].values[0]
+106 | 
+107 |             current_prices_list = []
+108 |             for symbol, dictionary in current_prices.items():
+109 |                 current_prices_list.append(dictionary)
+110 |             average_close = (sum(current_prices_list) / len(current_prices_list))
+111 |             benchmark = pd.concat([benchmark, pd.DataFrame([[date, average_close]], columns=["Date", "Close"])],
+112 |                                   ignore_index=True)
+113 |             portfolio, res = exchange.execute_orders(date, universe, portfolio, average_close, signals, current_prices,
+114 |                                                      hyper_parameters.Fund.transaction_cost,
+115 |                                                      hyper_parameters.Fund.transaction_volume_change_aggression,
+116 |                                                      hyper_parameters.Fund.transaction_volume_adjustment_window,
+117 |                                                      hyper_parameters.Fund.transaction_volume_minimum,
+118 |                                                      hyper_parameters.Fund.transaction_volume_maximum)
+119 | 
+120 |             positives = 0
+121 |             negatives = 0
+122 |             neutrals = 0
+123 |             if res is not None and type(res) == dict:
+124 |                 positives = res["positives"]
+125 |                 negatives = res["negatives"]
+126 |                 neutrals = res["neutrals"]
+127 | 
+128 |             if i % 1 == 0:
+129 |                 print(f"==========================================")
+130 |                 print(f"DATE: {date.strftime('%Y-%m-%d')}")
+131 |                 print(f"Total Portfolio Value: {portfolio.current_portfolio_value}")
+132 |                 print(f"   - Cash ($): {portfolio.cash}")
+133 |                 print(f"   - Asset Value ($): {portfolio.current_asset_value}")
+134 |                 print(f"Positions: {portfolio.positions}")
+135 |                 print(f"   - Positive Sentiments: {positives}")
+136 |                 print(f"   - Negative Sentiments: {negatives}")
+137 |                 print(f"   - Neutral Sentiments: {neutrals}")
+138 |                 print(f"Total Orders: {positives + negatives + neutrals}")
+139 | 
+140 |             if res is not None and res == "BANKRUPT":
+141 |                 print(f"==========================================")
+142 |                 print(f"DATE: {date.strftime('%Y-%m-%d')}")
+143 |                 print(f"BANKRUPTCY, failing the simulation...")
+144 |                 print(f"==========================================")
+145 |                 break
+146 | 
+147 |             p_values.append(cp.deepcopy(portfolio.positions))
+148 | 
+149 |         portfolio.visualize_metrics(strategy_name=inst.name)
+150 |         visualize_stock_positions(p_values, smoothen_days=20)
+151 |         cumulative_return_history = []
+152 |         for data in portfolio.portfolio_history:
+153 |             cumulative_return_history.append(data['portfolio_value'])
+154 |         return cumulative_return_history
+155 | 
+156 | 
+157 | def run(hyper_parameters=HyperParameters, test_set=None):
+158 |     print(f"Running simulation with hyper parameters: {hyper_parameters}")
+159 |     print(f"Running simulation with test set: {test_set}")
+160 |     overall_rets = {}
+161 | 
+162 |     if test_set is None:
+163 |         test_set = {
+164 |             "randoms": False,
+165 |             "naives": False,
+166 |             "rsi": True,
+167 |             "macd": False,
+168 |             "sma": False,
+169 |             "ema": False,
+170 |             "bollinger": False,
+171 |             "forest": False,
+172 |             "alphas": {
+173 |                 "01": False,
+174 |                 "02": False,
+175 |                 "03": False,
+176 |                 "04": False,
+177 |                 "05": False,
+178 |             },
+179 |             "deep_neural": False,
+180 |             "gpt-3.5": False,
+181 |             "gpt-4": False,
+182 |             "main_case": False,
+183 |         }
+184 | 
+185 |     # Try the 'Random Long Short Strategy'
+186 |     if test_set["randoms"]:
+187 |         randoms_rets = simulate(strategy=randoms.RandomLongShortStrategy, download_data=False, external_data=True,
+188 |                                 hyper_parameters=hyper_parameters)
+189 |         overall_rets["randoms"] = randoms_rets
+190 | 
+191 |     # Try the 'Naive Long Short Strategy'
+192 |     if test_set["naives"]:
+193 |         naives_rets = simulate(strategy=naives.NaiveLongShortStrategy, download_data=False, external_data=True,
+194 |                                window=15, hyper_parameters=hyper_parameters)
+195 |         overall_rets["naives"] = naives_rets
+196 | 
+197 |     # Try the 'RSI Long Short Strategy'
+198 |     if test_set["rsi"]:
+199 |         rsi_rets = simulate(strategy=rsi.RSILongShortStrategy, download_data=False, external_data=True, window=10,
+200 |                             down_threshold=30, up_threshold=70, hyper_parameters=hyper_parameters)
+201 |         overall_rets["rsi"] = rsi_rets
+202 | 
+203 |     # Try the 'MACD Long Short Strategy'
+204 |     if test_set["macd"]:
+205 |         macd_rets = simulate(strategy=macd.MACDLongShortStrategy, download_data=False, external_data=True,
+206 |                              short_window=12,
+207 |                              long_window=26, signal_window=9, hyper_parameters=hyper_parameters)
+208 |         overall_rets["macd"] = macd_rets
+209 | 
+210 |     # Try the 'SMA Long Short Strategy'
+211 |     if test_set["sma"]:
+212 |         sma_rets = simulate(strategy=sma.SMALongShortStrategy, download_data=False, external_data=True, window=15,
+213 |                             hyper_parameters=hyper_parameters)
+214 |         overall_rets["sma"] = sma_rets
+215 | 
+216 |     # Try the 'EMA Long Short Strategy'
+217 |     if test_set["ema"]:
+218 |         ema_rets = simulate(strategy=ema.EMALongShortStrategy, download_data=False, external_data=True, window=15,
+219 |                             hyper_parameters=hyper_parameters)
+220 |         overall_rets["ema"] = ema_rets
+221 | 
+222 |     # Try the 'Bollinger Bands Long Short Strategy'
+223 |     if test_set["bollinger"]:
+224 |         bollinger_rets = simulate(strategy=bollinger.BollingerLongShortStrategy, download_data=False,
+225 |                                   external_data=True,
+226 |                                   window=20, k=1,
+227 |                                   hyper_parameters=hyper_parameters)
+228 |         overall_rets["bollinger"] = bollinger_rets
+229 | 
+230 |     # Try the 'Forest Long Short Strategy'
+231 |     if test_set["forest"]:
+232 |         forest_rets = simulate(strategy=forest.ForestLongShortStrategy, download_data=False, external_data=True,
+233 |                                training_data_limit=20, n_estimators=10, hyper_parameters=hyper_parameters)
+234 |         overall_rets["forest"] = forest_rets
+235 | 
+236 |     # Try the 'Alphas Long Short Strategies'
+237 |     if test_set["alphas"]["01"]:
+238 |         a01_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+239 |                             cmd="01", window=10, short_period=20, long_period=30,
+240 |                             hyper_parameters=hyper_parameters)
+241 |         overall_rets["a01"] = a01_rets
+242 |     if test_set["alphas"]["02"]:
+243 |         a02_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+244 |                             cmd="02", window=5, mean_window=10, volume_window=20, z_score_threshold=1.1,
+245 |                             hyper_parameters=hyper_parameters)
+246 |         overall_rets["a02"] = a02_rets
+247 |     if test_set["alphas"]["03"]:
+248 |         a03_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+249 |                             cmd="03", period=10, momentum_period=5, atr_period=5,
+250 |                             hyper_parameters=hyper_parameters)
+251 |         overall_rets["a03"] = a03_rets
+252 |     if test_set["alphas"]["04"]:
+253 |         a04_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+254 |                             cmd="04", period=14, fast_period=12, slow_period=26, smooth_period=9,
+255 |                             hyper_parameters=hyper_parameters)
+256 |         overall_rets["a04"] = a04_rets
+257 |     if test_set["alphas"]["05"]:
+258 |         a05_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
+259 |                             cmd="05", period=20, short_period=2, long_period=5, signal_period=3, threshold=1.5,
+260 |                             hyper_parameters=hyper_parameters)
+261 |         overall_rets["a05"] = a05_rets
+262 | 
+263 |     # Try the 'Deep Learning Long Short Strategy'
+264 |     if test_set["deep_neural"]:
+265 |         deep_rets = simulate(strategy=deep_neural.DeepLongShortStrategy, download_data=False, external_data=True,
+266 |                              learning_rate=0.1, epochs=1, hyper_parameters=hyper_parameters)
+267 |         overall_rets["deep"] = deep_rets
+268 | 
+269 |     # Try the 'GPT-3.5 Long Short Strategy'
+270 |     if test_set["gpt-3.5"]:
+271 |         gpt3_rets = simulate(strategy=gpt3_5.GPT_3_5LongShortStrategy, download_data=False, external_data=True,
+272 |                              hard_limit=1, lookback_limit=5, hyper_parameters=hyper_parameters)
+273 |         overall_rets["gpt-3.5"] = gpt3_rets
+274 | 
+275 |     # Try the 'GPT-4 Long Short Strategy'
+276 |     if test_set["gpt-4"]:
+277 |         gpt4_rets = simulate(strategy=gpt_4.GPT_4LongShortStrategy, download_data=False, external_data=True,
+278 |                              hard_limit=1, lookback_limit=5, hyper_parameters=hyper_parameters)
+279 |         overall_rets["gpt-4"] = gpt4_rets
+280 | 
+281 |     # MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
+282 |     if test_set["main_case"]:
+283 |         main_rets = simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True,
+284 |                              macd_short_window=12, macd_long_window=26, macd_signal_window=9,
+285 |                              atr_window=14, volatility_threshold=0.1, macd_threshold=0.1, oc_diff_threshold=0.1,
+286 |                              hl_diff_threshold=0.1, hyper_parameters=hyper_parameters)
+287 |         overall_rets["main_case"] = main_rets
+288 | 
+289 |     compare_and_visualize(overall_rets)
+290 |     return
+<CONTENT END>
+
+========================================METADATAPath: strategy/scraper/ScraperAgent.py
+File: strategy/scraper/ScraperAgent.py
+Size: 3529
+Last modified: 1705000166.2425532
+Last accessed: 1705000166.47632
+Created: 1705000166.2425532
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import datetime
+1 | import os
+2 | 
+3 | from strategy.clients.CoinGecko import CoinGecko
+4 | 
+5 | # This value is used to determine how many days of missing data is acceptable
+6 | interpolation_cutoff = 0.2
+7 | 
+8 | 
+9 | class ScraperAgent:
+10 | 
+11 |     def __init__(self, symbols, start_date, end_date):
+12 |         self.cg = CoinGecko()
+13 |         self.symbols = symbols
+14 |         self.start_date = start_date
+15 |         self.end_date = end_date
+16 | 
+17 |     @staticmethod
+18 |     def process_raw_price_data(raw_data, years_data):
+19 |         if raw_data is None:
+20 |             return None
+21 |         total_volumes = raw_data["total_volumes"]
+22 |         market_caps = raw_data["market_caps"]
+23 |         lines = 'date,price,total_volume,market_cap\n'
+24 |         if "prices" not in raw_data or "total_volumes" not in raw_data or "market_caps" not in raw_data or \
+25 |                 len(raw_data["prices"]) != len(raw_data["total_volumes"]) or \
+26 |                 len(raw_data["prices"]) != len(raw_data["market_caps"]):
+27 |             print(f'[WARNING] Instrument has missing data, skipping...')
+28 |             return None
+29 |         if len(raw_data["prices"]) < ((365-int(365*interpolation_cutoff))*years_data) or\
+30 |                 len(raw_data["prices"]) < (((365-int(365*interpolation_cutoff))*years_data)+1):
+31 |             print(f'[WARNING] Instrument as {len(raw_data["prices"])} days of data, skipping...')
+32 |             return None
+33 |         for i, data in enumerate(raw_data["prices"]):
+34 |             timestamp = data[0]
+35 |             date = datetime.datetime.utcfromtimestamp(int(str(timestamp)[:-3])).strftime('%Y-%m-%d')
+36 |             price = data[1]
+37 |             total_volume = total_volumes[i][1]
+38 |             market_cap = market_caps[i][1]
+39 |             new_line = f'{date},{price},{total_volume},{market_cap}\n'
+40 |             lines += new_line
+41 |         return lines
+42 | 
+43 |     def process_metadata(self):
+44 |         lines = 'symbol,id,name\n'
+45 |         for symbol, content in self.cg.coin_ids.items():
+46 |             if "," in symbol or "," in content["id"] or "," in content["name"]:
+47 |                 continue
+48 |             new_line = f'{symbol},{content["id"]},{content["name"]}\n'
+49 |             lines += new_line
+50 |         return lines
+51 | 
+52 |     def download_price_data(self, is_training_data=True):
+53 |         sub_directory = 'train' if is_training_data else 'test'
+54 |         years_data = 2 if is_training_data else 1
+55 |         metadata = self.process_metadata()
+56 |         try:
+57 |             with open(f'data/metadata/coins_metadata.csv', 'w') as f:
+58 |                 f.write(metadata)
+59 |         except Exception as err:
+60 |             print(err)
+61 |             exit(1)
+62 |         count_success = 0
+63 |         for symbol in self.symbols:
+64 |             if f'{symbol}.csv' in os.listdir(f'data/{sub_directory}'):
+65 |                 print(f'[WARNING] {symbol} already exists in data/{sub_directory}, skipping...')
+66 |                 continue
+67 |             price_data = self.cg.get_price_data(symbol, self.start_date, self.end_date)
+68 |             if price_data is None:
+69 |                 continue
+70 |             processed_price_data = self.process_raw_price_data(price_data, years_data)
+71 |             if processed_price_data is None:
+72 |                 continue
+73 |             try:
+74 |                 with open(f'data/{sub_directory}/{symbol}.csv', 'w') as f:
+75 |                     f.write(processed_price_data)
+76 |                 count_success += 1
+77 |             except Exception as err:
+78 |                 print(err)
+79 |                 continue
+80 |         print(f'[SUCCESS] Downloaded price data successfully for ({count_success}/{len(self.symbols)}) symbols.')
+81 |         return count_success
+82 | 
+83 | 
+84 | if __name__ == '__main__':
+85 |     pass
+<CONTENT END>
+
+========================================METADATAPath: strategy/clients/GPTClient.py
+File: strategy/clients/GPTClient.py
+Size: 2246
+Last modified: 1705000166.2298915
+Last accessed: 1705000166.4893148
+Created: 1705000166.2298915
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import contextlib
+1 | import io
+2 | import sys
+3 | 
+4 | import dotenv
+5 | import openai
+6 | from openai import OpenAI
+7 | 
+8 | dotenv.load_dotenv(dotenv.find_dotenv())
+9 | config = dotenv.dotenv_values()
+10 | 
+11 | 
+12 | class GPTClient:
+13 |     class GPTAssistant:
+14 |         def __init__(self, client, instructions, model="gpt-4", max_tokens=200, temperature=0.5):
+15 |             self.instructions = instructions
+16 |             self.model = model
+17 |             self.max_tokens = max_tokens
+18 |             self.temperature = temperature
+19 |             self.client = client
+20 | 
+21 |         def ask(self, question, **kwargs):
+22 |             message_list = [
+23 |                 {"role": "system", "content": self.instructions},
+24 |                 {"role": "user", "content": question},
+25 |             ]
+26 |             for addition in kwargs:
+27 |                 message_list.insert(1, {"role": "system", "content": kwargs[addition]})
+28 |             response = self.client.chat.completions.create(
+29 |                 model=self.model,
+30 |                 messages=message_list,
+31 |             )
+32 |             answer = response.choices[0].message.content
+33 |             return answer
+34 | 
+35 |     def __init__(self):
+36 |         self.api_key = config['OPENAI_API_KEY']
+37 |         self.client = OpenAI(api_key=self.api_key)
+38 |         self.assistants = {}
+39 | 
+40 |     def build_assistant(self, name, instructions, model, max_tokens, temperature):
+41 |         ast = self.GPTAssistant(self.client, instructions, model, max_tokens, temperature)
+42 |         self.assistants[name] = ast
+43 | 
+44 |     def get_assistant(self, name):
+45 |         return self.assistants[name]
+46 | 
+47 | 
+48 | if __name__ == "__main__":
+49 |     # test the GPTClient
+50 |     gpt_client = GPTClient()
+51 |     gpt_client.build_assistant(name="test",
+52 |                                instructions=
+53 |                                """
+54 |                                You are a helpful assistant.
+55 |                                """,
+56 |                                model="gpt-4",
+57 |                                max_tokens=500,
+58 |                                temperature=0.0)
+59 |     assistant = gpt_client.get_assistant(name="test")
+60 |     # print(assistant.ask("What is your name?"))
+61 |     # print(assistant.ask("What is 2 + 2?"))
+62 |     # print(assistant.ask("Do androids dream of electric sheep?"))
+63 |     print(assistant.ask("What is the meaning of life?", addt="(The answer is 42.)"))
+64 | 
+<CONTENT END>
+
+========================================METADATAPath: strategy/clients/CoinGecko.py
+File: strategy/clients/CoinGecko.py
+Size: 3310
+Last modified: 1705000166.287341
+Last accessed: 1705000167.626729
+Created: 1705000166.287341
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import datetime
+1 | from time import sleep
+2 | 
+3 | import requests
+4 | import dotenv
+5 | 
+6 | 
+7 | BASE_CURRENCY = 'usd'
+8 | RETRY_COUNT = 100
+9 | 
+10 | # Initialize dotenv
+11 | dotenv.load_dotenv(dotenv.find_dotenv())
+12 | config = dotenv.dotenv_values()
+13 | 
+14 | 
+15 | def is_retry_approved():
+16 |     global RETRY_COUNT
+17 |     max_retries = 2
+18 |     while RETRY_COUNT < max_retries:
+19 |         yield True
+20 |         RETRY_COUNT += 1
+21 |     RETRY_COUNT = 0
+22 |     yield False
+23 | 
+24 | 
+25 | class CoinGecko:
+26 | 
+27 |     def __init__(self):
+28 |         self.root = 'https://api.coingecko.com/api/v3/'
+29 |         self.api_key = config['COINGECKO_API_KEY']
+30 |         self.coin_ids = self.retrieve_coin_ids()
+31 | 
+32 |     def build_query_params_string(self, *param):
+33 |         query_params = ''
+34 |         if "?" not in self.root:
+35 |             query_params += '?'
+36 |         for p in param:
+37 |             query_params += f'{p[0]}={p[1]}&'
+38 |         query_params = query_params[:-1]
+39 |         return query_params
+40 | 
+41 |     def retrieve_coin_ids(self):
+42 |         route = 'coins/list'
+43 |         url = self.root + route
+44 |         try:
+45 |             response = requests.get(url, headers={
+46 |                 'Accept': 'application/json', 'x-cg-pro-api-key': self.api_key})
+47 |         except Exception as err:
+48 |             exit(err)
+49 |         if response is None:
+50 |             exit(response)
+51 |         if response.status_code != 200:
+52 |             exit(response.json())
+53 |         coin_ids = {}
+54 |         for coin in response.json():
+55 |             coin_ids[coin['symbol']] = coin
+56 |         return coin_ids
+57 | 
+58 |     def get_price_data(self, symbol, start_date, end_date):
+59 |         symbol = symbol.lower()
+60 |         # convert start_date and end_date to unix timestamp
+61 |         start_date_object = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+62 |         start_date_timestamp = int(datetime.datetime.timestamp(start_date_object))
+63 |         end_date_object = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+64 |         end_date_timestamp = int(datetime.datetime.timestamp(end_date_object))
+65 |         if symbol not in self.coin_ids or self.coin_ids[symbol] is None or self.coin_ids[symbol]['id'] is None:
+66 |             print(f'[ERROR] {symbol} is not supported by CoinGecko...')
+67 |             return None
+68 |         coin_id = self.coin_ids[symbol]['id']
+69 |         route = f'coins/{coin_id}/market_chart/range'
+70 |         query_params = self.build_query_params_string(
+71 |             ('vs_currency', BASE_CURRENCY), ('from', start_date_timestamp), ('to', end_date_timestamp))
+72 |         url = self.root + route + query_params
+73 |         try:
+74 |             response = requests.get(url, headers={
+75 |                 'Accept': 'application/json'})
+76 |         except Exception as err:
+77 |             exit(err)
+78 |         if response is None:
+79 |             exit(response)
+80 |         if str(response.status_code)[0] == '4':
+81 |             if not is_retry_approved():
+82 |                 print(f'[ERROR] {response.json()}')
+83 |                 return None
+84 |             print(f'[WARNING] The rate limit has been reached. Retrying in 60 seconds...')
+85 |             sleep(60)  # bypass rate limit
+86 |             return self.get_price_data(symbol, start_date, end_date)
+87 |         if "prices" not in response.json():
+88 |             return None
+89 |         print(f'[SUCCESS] Fetched {symbol} data from {start_date} to {end_date}...')
+90 |         return response.json()
+91 | 
+92 | 
+93 | # Test CoinGecko client
+94 | if __name__ == '__main__':
+95 |     cg = CoinGecko()
+96 |     print(cg.coin_ids)
+97 |     print(len(cg.coin_ids))
+<CONTENT END>
+
+========================================METADATAPath: strategy/exchange/Exchange.py
+File: strategy/exchange/Exchange.py
+Size: 2618
+Last modified: 1705000166.2402587
+Last accessed: 1705000166.479302
+Created: 1705000166.2402587
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | from strategy.models import Portfolio
+1 | 
+2 | 
+3 | class Exchange:
+4 | 
+5 |     def __init__(self):
+6 |         pass
+7 | 
+8 |     @staticmethod
+9 |     def execute_orders(date, universe, portfolio: Portfolio, current_benchmark: list, orders: dict,
+10 |                        current_prices: dict,
+11 |                        transaction_cost=0.0, risk_tolerance=0.0,
+12 |                        returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=1000):
+13 |         portfolio.portfolio_value(current_prices=current_prices, benchmark=current_benchmark, date=date)
+14 |         r = ""
+15 |         positives = 0
+16 |         negatives = 0
+17 |         neutrals = 0
+18 |         for symbol, sentiment in orders.items():
+19 |             current_price = current_prices[symbol]
+20 |             if sentiment == 'up':
+21 |                 r = portfolio.assign_upward(symbol, current_price, date, transaction_cost=transaction_cost,
+22 |                                             risk_tolerance=risk_tolerance,
+23 |                                             returns_window=returns_window,
+24 |                                             minimum_transaction_volume=minimum_transaction_volume,
+25 |                                             maximum_transaction_volume=maximum_transaction_volume)
+26 |                 positives += 1
+27 |             elif sentiment == 'down':
+28 |                 r = portfolio.assign_downward(symbol, current_price, date, transaction_cost=transaction_cost,
+29 |                                               risk_tolerance=risk_tolerance,
+30 |                                               returns_window=returns_window,
+31 |                                               minimum_transaction_volume=minimum_transaction_volume,
+32 |                                               maximum_transaction_volume=maximum_transaction_volume)
+33 |                 negatives += 1
+34 |             elif sentiment == 'hold':
+35 |                 r = portfolio.assign_hold(symbol, current_price, date, transaction_cost=transaction_cost,
+36 |                                           risk_tolerance=risk_tolerance,
+37 |                                           returns_window=returns_window,
+38 |                                           minimum_transaction_volume=minimum_transaction_volume,
+39 |                                           maximum_transaction_volume=maximum_transaction_volume)
+40 |                 neutrals += 1
+41 |             else:
+42 |                 print(f"Unknown sentiment: {sentiment} for symbol {symbol}")
+43 |         if r == "BANKRUPT":
+44 |             return portfolio, r
+45 |         else:
+46 |             return portfolio, {
+47 |                 "positives": positives,
+48 |                 "negatives": negatives,
+49 |                 "neutrals": neutrals,
+50 |             }
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/RandomLongShortStrategy/metrics.txt
+File: strategy/records/RandomLongShortStrategy/metrics.txt
+Size: 262
+Last modified: 1705054244.4124835
+Last accessed: 1705054246.402276
+Created: 1705054244.4124835
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -1.019509891550029
+1 | Average Daily Return: 0.045128461427746035
+2 | Average Daily Excess Return: 0.03142983129075973
+3 | Average Daily Return Standard Deviation: 0.6051502313881458
+4 | Sharpe Ratio: 0.07084466774917027
+5 | Maximum Drawdown: -2081.2782374801827
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/NaiveLongShortStrategy/metrics.txt
+File: strategy/records/NaiveLongShortStrategy/metrics.txt
+Size: 266
+Last modified: 1705054255.5106328
+Last accessed: 1705054257.7264838
+Created: 1705054255.5106328
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -0.27033969301867233
+1 | Average Daily Return: 0.0002030984869449128
+2 | Average Daily Excess Return: -0.013495531650041397
+3 | Average Daily Return Standard Deviation: 0.04644011645491932
+4 | Sharpe Ratio: -0.3630200536769835
+5 | Maximum Drawdown: 760996.0961780141
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/EMALongShortStrategy/metrics.txt
+File: strategy/records/EMALongShortStrategy/metrics.txt
+Size: 265
+Last modified: 1705054310.468096
+Last accessed: 1705054312.416779
+Created: 1705054310.468096
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 0.11892335518544717
+1 | Average Daily Return: 0.0007677950336605265
+2 | Average Daily Excess Return: -0.01293083510332577
+3 | Average Daily Return Standard Deviation: 0.03051834207673303
+4 | Sharpe Ratio: -0.3937613444120168
+5 | Maximum Drawdown: 1152449.5168747134
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/MainLongShortStrategy/metrics.txt
+File: strategy/records/MainLongShortStrategy/metrics.txt
+Size: 268
+Last modified: 1705054462.9336398
+Last accessed: 1705054465.285222
+Created: 1705054462.9336398
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 0.002864936103736504
+1 | Average Daily Return: 0.0005765662958960962
+2 | Average Daily Excess Return: -0.013122063841090199
+3 | Average Daily Return Standard Deviation: 0.03365536361027788
+4 | Sharpe Ratio: -0.37084610661952405
+5 | Maximum Drawdown: 1002913.9736487295
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/AlphaStrategy_002/metrics.txt
+File: strategy/records/AlphaStrategy_002/metrics.txt
+Size: 268
+Last modified: 1705054381.6012514
+Last accessed: 1705054384.0824125
+Created: 1705054381.6012514
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -0.13046387999282172
+1 | Average Daily Return: -0.00021207387609954405
+2 | Average Daily Excess Return: -0.013910704013085843
+3 | Average Daily Return Standard Deviation: 0.018413387136380223
+4 | Sharpe Ratio: -2.269301106856273
+5 | Maximum Drawdown: 854885.7366137506
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/AlphaStrategy_005/metrics.txt
+File: strategy/records/AlphaStrategy_005/metrics.txt
+Size: 265
+Last modified: 1705054434.247265
+Last accessed: 1705054436.4120572
+Created: 1705054434.247265
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 0.6800732978679416
+1 | Average Daily Return: 0.0018901904680930339
+2 | Average Daily Excess Return: -0.011808439668893271
+3 | Average Daily Return Standard Deviation: 0.030891297559979235
+4 | Sharpe Ratio: -0.3302663994757903
+5 | Maximum Drawdown: 1713168.663077099
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/AlphaStrategy_004/metrics.txt
+File: strategy/records/AlphaStrategy_004/metrics.txt
+Size: 261
+Last modified: 1705054394.288198
+Last accessed: 1705054395.9832342
+Created: 1705054394.288198
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -2.5450874868006714
+1 | Average Daily Return: -0.24671226043053687
+2 | Average Daily Excess Return: -0.26041089056752315
+3 | Average Daily Return Standard Deviation: 1.6605667690197505
+4 | Sharpe Ratio: -0.190605437090766
+5 | Maximum Drawdown: 167037.9588443668
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/AlphaStrategy_003/metrics.txt
+File: strategy/records/AlphaStrategy_003/metrics.txt
+Size: 264
+Last modified: 1705054390.8596094
+Last accessed: 1705054393.2727761
+Created: 1705054390.8596094
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -1.5262961988077008
+1 | Average Daily Return: -0.02450448752405036
+2 | Average Daily Excess Return: -0.038203117661036665
+3 | Average Daily Return Standard Deviation: 0.29880390963052805
+4 | Sharpe Ratio: -0.9977345110828035
+5 | Maximum Drawdown: 334144.0761490585
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/BoilingerLongShortStrategy/metrics.txt
+File: strategy/records/BoilingerLongShortStrategy/metrics.txt
+Size: 261
+Last modified: 1705054311.865215
+Last accessed: 1705054313.5768127
+Created: 1705054311.865215
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -1.34339774458869
+1 | Average Daily Return: -0.07688647324750958
+2 | Average Daily Excess Return: -0.09058510338449588
+3 | Average Daily Return Standard Deviation: 0.43690033266205663
+4 | Sharpe Ratio: 2.4356737921140867
+5 | Maximum Drawdown: 268684.35812389234
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/RSILongShortStrategy/metrics.txt
+File: strategy/records/RSILongShortStrategy/metrics.txt
+Size: 266
+Last modified: 1705054267.6831033
+Last accessed: 1705054268.9997985
+Created: 1705054267.6831033
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 1.3963256061637996
+1 | Average Daily Return: 0.0026802226739670197
+2 | Average Daily Excess Return: -0.011018407463019284
+3 | Average Daily Return Standard Deviation: 0.024184575340476685
+4 | Sharpe Ratio: -0.3577007855550087
+5 | Maximum Drawdown: 2399287.7490266124
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/AlphaStrategy_001/metrics.txt
+File: strategy/records/AlphaStrategy_001/metrics.txt
+Size: 266
+Last modified: 1705054361.5666409
+Last accessed: 1705054363.9705684
+Created: 1705054361.5666409
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: -0.03221206618567929
+1 | Average Daily Return: -1.636205759323744e-05
+2 | Average Daily Excess Return: -0.01371499219457954
+3 | Average Daily Return Standard Deviation: 0.012074938889436747
+4 | Sharpe Ratio: -3.164263381065015
+5 | Maximum Drawdown: 970551.7986277421
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/ForestLongShortStrategy/metrics.txt
+File: strategy/records/ForestLongShortStrategy/metrics.txt
+Size: 265
+Last modified: 1705054339.3602219
+Last accessed: 1705054341.8143518
+Created: 1705054339.3602219
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 0.4320692299742446
+1 | Average Daily Return: 0.0015077963840366855
+2 | Average Daily Excess Return: -0.012190833752949616
+3 | Average Daily Return Standard Deviation: 0.032526915994744394
+4 | Sharpe Ratio: -0.3482444122044208
+5 | Maximum Drawdown: 1393563.697796851
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/MACDLongShortStrategy/metrics.txt
+File: strategy/records/MACDLongShortStrategy/metrics.txt
+Size: 262
+Last modified: 1705054288.0133326
+Last accessed: 1705054289.7508807
+Created: 1705054288.0133326
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 0.4062103584368375
+1 | Average Daily Return: 0.0011119534912256911
+2 | Average Daily Excess Return: -0.01258667664576061
+3 | Average Daily Return Standard Deviation: 0.01912444976613432
+4 | Sharpe Ratio: -8.81572342461609
+5 | Maximum Drawdown: 1389826.2540293387
+<CONTENT END>
+
+========================================METADATAPath: strategy/records/SMALongShortStrategy/metrics.txt
+File: strategy/records/SMALongShortStrategy/metrics.txt
+Size: 266
+Last modified: 1705054298.829049
+Last accessed: 1705054300.5732374
+Created: 1705054298.829049
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | Cumulative Return: 0.2961460481994087
+1 | Average Daily Return: 0.0011040009055370426
+2 | Average Daily Excess Return: -0.012594629231449266
+3 | Average Daily Return Standard Deviation: 0.028242193307085276
+4 | Sharpe Ratio: -0.39398089364852135
+5 | Maximum Drawdown: 1329371.201830589
+<CONTENT END>
+
+========================================METADATAPath: strategy/additional_tests/compare.py
+File: strategy/additional_tests/compare.py
+Size: 1831
+Last modified: 1705000166.2372677
+Last accessed: 1705000167.1702647
+Created: 1705000166.2372677
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import datetime
+1 | import os
+2 | from typing import List
+3 | 
+4 | import pandas as pd
+5 | import matplotlib.pyplot as plt
+6 | 
+7 | 
+8 | def create_directory_if_not_exists(path: str):
+9 |     if not os.path.exists(path):
+10 |         os.makedirs(path)
+11 | 
+12 | 
+13 | def compare_and_visualize(overall_rets: dict[str, List]):
+14 |     create_directory_if_not_exists('strategy/additional_tests/performance_outputs')
+15 |     for name, rets in overall_rets.items():
+16 |         if len(rets) == 0:
+17 |             continue
+18 |         plt.plot(rets, label=name)
+19 |     plt.title('Cumulative Return Comparison')
+20 |     plt.xlabel('Date')
+21 |     plt.ylabel('Cumulative Return')
+22 |     plt.legend()
+23 |     plt.grid()
+24 |     plt.savefig(f'strategy/additional_tests/performance_outputs/performance_comparison_chart_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.png')
+25 |     plt.clf()
+26 | 
+27 | 
+28 | def visualize_stock_positions(portfolio_history, smoothen_days=20):
+29 |     create_directory_if_not_exists('strategy/additional_tests/performance_outputs')
+30 |     ys1 = [(p["IOTA"] if "IOTA" in p else 0) for p in portfolio_history]
+31 |     ys2 = [(p["chainlink"] if "chainlink" in p else 0) for p in portfolio_history]
+32 |     ys3 = [(p["Helium"] if "Helium" in p else 0) for p in portfolio_history]
+33 |     ys1 = pd.Series(ys1).rolling(smoothen_days).mean()
+34 |     ys2 = pd.Series(ys2).rolling(smoothen_days).mean()
+35 |     ys3 = pd.Series(ys3).rolling(smoothen_days).mean()
+36 |     plt.plot(list(range(len(portfolio_history))), ys1, label="IOTA")
+37 |     plt.plot(list(range(len(portfolio_history))), ys2, label="chainlink")
+38 |     plt.plot(list(range(len(portfolio_history))), ys3, label="Helium")
+39 |     plt.title('Stock Positions')
+40 |     plt.xlabel('Date')
+41 |     plt.ylabel('Position')
+42 |     plt.legend()
+43 |     plt.grid()
+44 |     plt.savefig(f'strategy/additional_tests/performance_outputs/stock_positions_chart_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.png')
+45 |     plt.clf()
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/main_case.py
+File: strategy/strategies/main_case.py
+Size: 4495
+Last modified: 1705000166.2485285
+Last accessed: 1705000166.5437038
+Created: 1705000166.2485285
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import numpy as np
+1 | import pandas as pd
+2 | 
+3 | 
+4 | class MainLongShortStrategy:
+5 |     """
+6 |     Main long/short strategy.
+7 |     """
+8 | 
+9 |     def __init__(self):
+10 |         self.name = 'MainLongShortStrategy'
+11 |         self.description = 'Main long/short strategy.'
+12 |         self.signals = [
+13 |             'up',
+14 |             'down',
+15 |             'hold',
+16 |         ]
+17 | 
+18 |     # MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
+19 |     def evaluate_symbol(self, date, symbol, dataframe,
+20 |                         macd_short_window=10,
+21 |                         macd_long_window=20,
+22 |                         macd_signal_window=3,
+23 |                         atr_window=5,
+24 |                         volatility_threshold=0.001,
+25 |                         macd_threshold=0.05,
+26 |                         oc_diff_threshold=0.01,
+27 |                         hl_diff_threshold=0.01):
+28 |         if not date - pd.Timedelta(days=1) in dataframe['Date'].values:
+29 |             return self.signals[2]
+30 |         dataframe = dataframe.copy()
+31 |         dataframe = dataframe[dataframe['Date'] < date]
+32 | 
+33 |         def calculate_macd(df, short_window=macd_short_window, long_window=macd_long_window,
+34 |                            signal_window=macd_signal_window):
+35 |             short_ema = df['Close'].ewm(span=short_window, adjust=False).mean()
+36 |             long_ema = df['Close'].ewm(span=long_window, adjust=False).mean()
+37 |             macd = short_ema - long_ema
+38 |             signal_line = macd.ewm(span=signal_window, adjust=False).mean()
+39 |             return macd.iloc[-1] - signal_line.iloc[-1]
+40 | 
+41 |         def calculate_atr(df, window=atr_window):
+42 |             high_low = df['High'] - df['Low']
+43 |             high_close = np.abs(df['High'] - df['Close'].shift())
+44 |             low_close = np.abs(df['Low'] - df['Close'].shift())
+45 |             ranges = pd.DataFrame({
+46 |                 'high_low': high_low,
+47 |                 'high_close': high_close,
+48 |                 'low_close': low_close
+49 |             })
+50 |             true_range = ranges.max(axis=1)
+51 |             atr = true_range.rolling(window=window).mean()
+52 |             return atr.iloc[-1]
+53 | 
+54 |         macd = calculate_macd(dataframe, macd_short_window, macd_long_window, macd_signal_window)
+55 |         atr = calculate_atr(dataframe, atr_window)
+56 |         avg_volume = dataframe['Volume'].rolling(window=macd_long_window).mean().iloc[-1]
+57 |         last_day_volume = dataframe['Volume'].iloc[-1]
+58 |         last_day_data = dataframe.iloc[-1]
+59 |         open_close_diff = last_day_data['Close'] - last_day_data['Open']
+60 |         high_low_diff = last_day_data['High'] - last_day_data['Low']
+61 |         if atr > volatility_threshold:
+62 |             if macd > macd_threshold:
+63 |                 if last_day_volume > avg_volume:
+64 |                     if open_close_diff > oc_diff_threshold:
+65 |                         if high_low_diff > hl_diff_threshold:
+66 |                             return 'down'
+67 |                         else:
+68 |                             return 'hold'
+69 |                     else:
+70 |                         return 'down'
+71 |                 else:
+72 |                     return 'up'
+73 |             else:
+74 |                 return 'up'
+75 |         else:
+76 |             if macd > macd_threshold:
+77 |                 if last_day_volume > avg_volume:
+78 |                     if open_close_diff > oc_diff_threshold:
+79 |                         if high_low_diff > hl_diff_threshold:
+80 |                             return 'up'
+81 |                         else:
+82 |                             return 'hold'
+83 |                     else:
+84 |                         return 'up'
+85 |                 else:
+86 |                     return 'down'
+87 |             else:
+88 |                 return 'down'
+89 | 
+90 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+91 |         signals = {}
+92 |         for symbol, dataframe in universe.items():
+93 |             signal = self.evaluate_symbol(date, symbol, dataframe, macd_short_window=kwargs['macd_short_window'],
+94 |                                           macd_long_window=kwargs['macd_long_window'],
+95 |                                           macd_signal_window=kwargs['macd_signal_window'],
+96 |                                           atr_window=kwargs['atr_window'],
+97 |                                           volatility_threshold=kwargs['volatility_threshold'],
+98 |                                           macd_threshold=kwargs['macd_threshold'],
+99 |                                           oc_diff_threshold=kwargs['oc_diff_threshold'],
+100 |                                           hl_diff_threshold=kwargs['hl_diff_threshold'])
+101 |             signals[symbol] = signal
+102 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/alphas.py
+File: strategy/strategies/alphas.py
+Size: 10187
+Last modified: 1705000166.2708921
+Last accessed: 1705000167.1379478
+Created: 1705000166.2708921
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | class AlphaStrategy:
+4 |     """
+5 |     Alpha strategy base class.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'AlphaStrategy'
+9 |         self.description = 'Alpha strategy base class.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     # VOLUME WEIGHTED PRICE MOMENTUM
+17 |     def evaluate_symbol_001(self, date, symbol, dataframe, window=10, short_period=5, long_period=20):
+18 |         self.name = 'AlphaStrategy_001'
+19 |         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+20 |             return self.signals[2]
+21 |         dataframe = dataframe.copy()
+22 |         dataframe = dataframe[dataframe['Date'] < date]
+23 | 
+24 |         def calculate_vwap(dataframe, period=window):
+25 |             cum_vol = dataframe['Volume'].rolling(window=period).sum()
+26 |             cum_vol_price = (dataframe['Close'] * dataframe['Volume']).rolling(window=period).sum()
+27 |             vwap = cum_vol_price / cum_vol
+28 |             return vwap
+29 | 
+30 |         dataframe['VWAP_Short'] = calculate_vwap(dataframe, short_period)
+31 |         dataframe['VWAP_Long'] = calculate_vwap(dataframe, long_period)
+32 |         if dataframe['VWAP_Short'].iloc[-1] > dataframe['VWAP_Long'].iloc[-1] and dataframe['VWAP_Short'].iloc[-2] <= \
+33 |                 dataframe['VWAP_Long'].iloc[-2]:
+34 |             return self.signals[0]
+35 |         elif dataframe['VWAP_Short'].iloc[-1] < dataframe['VWAP_Long'].iloc[-1] and dataframe['VWAP_Short'].iloc[-2] >= \
+36 |                 dataframe['VWAP_Long'].iloc[-2]:
+37 |             return self.signals[1]
+38 |         else:
+39 |             return self.signals[2]
+40 | 
+41 |     # MEAN REVERSION WITH VOLUME CONFIRMATION
+42 |     def evaluate_symbol_002(self, date, symbol, dataframe, window=30, mean_window=10, volume_window=10,
+43 |                             z_score_threshold=1.5):
+44 |         self.name = 'AlphaStrategy_002'
+45 |         if not date - pd.Timedelta(days=1) in dataframe['Date'].values:
+46 |             return self.signals[2]
+47 |         dataframe = dataframe.copy()
+48 |         dataframe = dataframe[dataframe['Date'] < date]
+49 | 
+50 |         def calculate_z_score(dataframe, window=window):
+51 |             mean = dataframe['Close'].rolling(window=window).mean()
+52 |             std_dev = dataframe['Close'].rolling(window=window).std()
+53 |             z_score = (dataframe['Close'] - mean) / std_dev
+54 |             return z_score
+55 | 
+56 |         dataframe['Z_Score'] = calculate_z_score(dataframe, window=mean_window)
+57 |         dataframe['Avg_Volume'] = dataframe['Volume'].rolling(window=volume_window).mean()
+58 |         if dataframe['Z_Score'].iloc[-1] < -z_score_threshold and dataframe['Volume'].iloc[-1] > \
+59 |                 dataframe['Avg_Volume'].iloc[-1]:
+60 |             return self.signals[0]
+61 |         elif dataframe['Z_Score'].iloc[-1] > z_score_threshold and dataframe['Volume'].iloc[-1] > \
+62 |                 dataframe['Avg_Volume'].iloc[-1]:
+63 |             return self.signals[1]
+64 |         else:
+65 |             return self.signals[2]
+66 | 
+67 |     # PRICE MOMENTUM WITH VOLATILITY ADJUSTMENT
+68 |     def evaluate_symbol_003(self, date, symbol, dataframe, period=14, momentum_period=10, atr_period=14):
+69 |         self.name = 'AlphaStrategy_003'
+70 |         if not date - pd.Timedelta(days=1) in dataframe['Date'].values:
+71 |             return self.signals[2]
+72 |         dataframe = dataframe.copy()
+73 |         dataframe = dataframe[dataframe['Date'] < date]
+74 | 
+75 |         def calculate_price_momentum(dataframe, period=period):
+76 |             momentum = dataframe['Close'].pct_change(periods=period)
+77 |             return momentum
+78 | 
+79 |         def calculate_atr(dataframe, period=period):
+80 |             high_low = dataframe['High'] - dataframe['Low']
+81 |             high_close = (dataframe['High'] - dataframe['Close'].shift()).abs()
+82 |             low_close = (dataframe['Low'] - dataframe['Close'].shift()).abs()
+83 | 
+84 |             ranges = pd.concat([high_low, high_close, low_close], axis=1)
+85 |             true_range = ranges.max(axis=1)
+86 |             atr = true_range.rolling(window=period).mean()
+87 |             return atr
+88 | 
+89 |         dataframe['Momentum'] = calculate_price_momentum(dataframe, period=momentum_period)
+90 |         dataframe['ATR'] = calculate_atr(dataframe, period=atr_period)
+91 |         if dataframe['Momentum'].iloc[-1] > 0 and dataframe['ATR'].iloc[-1] < dataframe['ATR'].mean():
+92 |             return self.signals[0]
+93 |         elif dataframe['Momentum'].iloc[-1] < 0 and dataframe['ATR'].iloc[-1] < dataframe['ATR'].mean():
+94 |             return self.signals[1]
+95 |         else:
+96 |             return self.signals[2]
+97 | 
+98 |     def evaluate_symbol_004(self, date, symbol, dataframe, period=14, fast_period=12, slow_period=26,
+99 |                             smooth_period=9):
+100 |         self.name = 'AlphaStrategy_004'
+101 |         if not date - pd.Timedelta(days=2) in dataframe['Date'].values:
+102 |             return self.signals[2]
+103 |         dataframe = dataframe.copy()
+104 |         dataframe = dataframe[dataframe['Date'] < date]
+105 | 
+106 |         def calculate_weighted_close(dataframe):
+107 |             weighted_close = (dataframe['Open'] + dataframe['High'] + dataframe['Low'] + dataframe['Close'] * 2) / 5
+108 |             return weighted_close
+109 | 
+110 |         def calculate_ema(dataframe, period=period):
+111 |             ema = dataframe.ewm(span=period, adjust=False).mean()
+112 |             return ema
+113 | 
+114 |         dataframe['Weighted_Close'] = calculate_weighted_close(dataframe)
+115 |         dataframe['Fast_EMA'] = calculate_ema(dataframe['Weighted_Close'], fast_period)
+116 |         dataframe['Slow_EMA'] = calculate_ema(dataframe['Weighted_Close'], slow_period)
+117 |         dataframe['Oscillator'] = dataframe['Fast_EMA'] - dataframe['Slow_EMA']
+118 |         dataframe['Smoothed_Oscillator'] = calculate_ema(dataframe['Oscillator'], smooth_period)
+119 |         if dataframe['Smoothed_Oscillator'].iloc[-1] > dataframe['Smoothed_Oscillator'].iloc[-2]:
+120 |             return self.signals[0]
+121 |         elif dataframe['Smoothed_Oscillator'].iloc[-1] < dataframe['Smoothed_Oscillator'].iloc[-2]:
+122 |             return self.signals[1]
+123 |         else:
+124 |             return self.signals[2]
+125 | 
+126 |     def evaluate_symbol_005(self, date, symbol, dataframe, period=20, short_period=12, long_period=26, signal_period=9,
+127 |                             threshold=1.5):
+128 |         self.name = 'AlphaStrategy_005'
+129 |         if not date - pd.Timedelta(days=1) in dataframe['Date'].values:
+130 |             return self.signals[2]
+131 |         dataframe = dataframe.copy()
+132 |         dataframe = dataframe[dataframe['Date'] < date]
+133 | 
+134 |         def calculate_macd(dataframe, short_period=short_period, long_period=long_period, signal_period=signal_period):
+135 |             short_ema = dataframe['Close'].ewm(span=short_period, adjust=False).mean()
+136 |             long_ema = dataframe['Close'].ewm(span=long_period, adjust=False).mean()
+137 |             macd = short_ema - long_ema
+138 |             signal_line = macd.ewm(span=signal_period, adjust=False).mean()
+139 |             return macd - signal_line
+140 | 
+141 |         def calculate_ppo(dataframe, short_period=short_period, long_period=long_period):
+142 |             short_ema = dataframe['Close'].ewm(span=short_period, adjust=False).mean()
+143 |             long_ema = dataframe['Close'].ewm(span=long_period, adjust=False).mean()
+144 |             ppo = ((short_ema - long_ema) / long_ema) * 100
+145 |             return ppo
+146 | 
+147 |         def calculate_dpo(dataframe, period=period):
+148 |             shifted_sma = dataframe['Close'].shift(period // 2 + 1).rolling(window=period).mean()
+149 |             dpo = dataframe['Close'] - shifted_sma
+150 |             return dpo
+151 | 
+152 |         dataframe['MACD_Score'] = calculate_macd(dataframe).apply(lambda x: 1 if x > 0 else -1)
+153 |         dataframe['PPO_Score'] = calculate_ppo(dataframe).apply(lambda x: 1 if x > 0 else -1)
+154 |         dataframe['DPO_Score'] = calculate_dpo(dataframe).apply(lambda x: 1 if x > 0 else -1)
+155 |         dataframe['Composite_Score'] = dataframe[['MACD_Score', 'PPO_Score', 'DPO_Score']].sum(axis=1)
+156 |         last_day_score = dataframe['Composite_Score'].iloc[-1]
+157 |         if last_day_score > threshold:
+158 |             return self.signals[0]
+159 |         elif last_day_score < -threshold:
+160 |             return self.signals[1]
+161 |         else:
+162 |             return self.signals[2]
+163 | 
+164 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+165 |         signals = {}
+166 |         for symbol, dataframe in universe.items():
+167 |             if kwargs['cmd'] == '01':
+168 |                 signal = self.evaluate_symbol_001(date, symbol, dataframe, window=kwargs['window'],
+169 |                                                   short_period=kwargs['short_period'],
+170 |                                                   long_period=kwargs['long_period'])
+171 |             elif kwargs['cmd'] == '02':
+172 |                 signal = self.evaluate_symbol_002(date, symbol, dataframe, window=kwargs['window'],
+173 |                                                   mean_window=kwargs['mean_window'],
+174 |                                                   volume_window=kwargs['volume_window'],
+175 |                                                   z_score_threshold=kwargs['z_score_threshold'])
+176 |             elif kwargs['cmd'] == '03':
+177 |                 signal = self.evaluate_symbol_003(date, symbol, dataframe, period=kwargs['period'],
+178 |                                                   momentum_period=kwargs['momentum_period'],
+179 |                                                   atr_period=kwargs['atr_period'])
+180 |             elif kwargs['cmd'] == '04':
+181 |                 signal = self.evaluate_symbol_004(date, symbol, dataframe, period=kwargs['period'],
+182 |                                                   fast_period=kwargs['fast_period'],
+183 |                                                   slow_period=kwargs['slow_period'],
+184 |                                                   smooth_period=kwargs['smooth_period'])
+185 |             elif kwargs['cmd'] == '05':
+186 |                 signal = self.evaluate_symbol_005(date, symbol, dataframe, period=kwargs['period'],
+187 |                                                   short_period=kwargs['short_period'],
+188 |                                                   long_period=kwargs['long_period'],
+189 |                                                   signal_period=kwargs['signal_period'],
+190 |                                                   threshold=kwargs['threshold'])
+191 |             else:
+192 |                 signal = self.evaluate_symbol_001(date, symbol, dataframe)
+193 |             signals[symbol] = signal
+194 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/macd.py
+File: strategy/strategies/macd.py
+Size: 1994
+Last modified: 1705000166.2343974
+Last accessed: 1705000167.197912
+Created: 1705000166.2343974
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | class MACDLongShortStrategy:
+4 |     """
+5 |     Moving Average Convergence Divergence long/short strategy.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'MACDLongShortStrategy'
+9 |         self.description = 'Moving Average Convergence Divergence long/short strategy.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     def evaluate_symbol(self, date, symbol, dataframe, short_window=12, long_window=26, signal_window=9):
+17 |         if not date - pd.Timedelta(days=long_window) in dataframe['Date'].values:
+18 |             return self.signals[2]
+19 |         dataframe = dataframe.copy()
+20 |         dataframe = dataframe[dataframe['Date'] < date]
+21 |         dataframe['EMA_12'] = dataframe['Close'].ewm(span=12, adjust=False).mean()
+22 |         dataframe['EMA_26'] = dataframe['Close'].ewm(span=26, adjust=False).mean()
+23 |         dataframe['MACD'] = dataframe['EMA_12'] - dataframe['EMA_26']
+24 |         dataframe['Signal_Line'] = dataframe['MACD'].ewm(span=9, adjust=False).mean()
+25 |         current_macd = dataframe['MACD'].iloc[-1]
+26 |         current_signal = dataframe['Signal_Line'].iloc[-1]
+27 |         previous_macd = dataframe['MACD'].iloc[-2]
+28 |         previous_signal = dataframe['Signal_Line'].iloc[-2]
+29 |         if current_macd > current_signal and previous_macd <= previous_signal:
+30 |             return "up"
+31 |         elif current_macd < current_signal and previous_macd >= previous_signal:
+32 |             return "down"
+33 |         else:
+34 |             return "hold"
+35 | 
+36 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+37 |         signals = {}
+38 |         for symbol, dataframe in universe.items():
+39 |             signal = self.evaluate_symbol(date, symbol, dataframe,
+40 |                                           short_window=kwargs['short_window'],
+41 |                                           long_window=kwargs['long_window'],
+42 |                                           signal_window=kwargs['signal_window'])
+43 |             signals[symbol] = signal
+44 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/ema.py
+File: strategy/strategies/ema.py
+Size: 1300
+Last modified: 1705000166.2741692
+Last accessed: 1705000167.1324856
+Created: 1705000166.2741692
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | class EMALongShortStrategy:
+4 |     """
+5 |     Exponential Moving Average long/short strategy.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'EMALongShortStrategy'
+9 |         self.description = 'Exponential Moving Average long/short strategy.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     def evaluate_symbol(self, date, symbol, dataframe, window=10):
+17 |         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+18 |             return self.signals[2]
+19 |         dataframe = dataframe.copy()
+20 |         dataframe = dataframe[dataframe['Date'] < date]
+21 |         last_10_days = dataframe.tail(window)
+22 |         ema = last_10_days['Close'].ewm(span=window, adjust=False).mean().iloc[-1]
+23 |         last_close = last_10_days['Close'].iloc[-1]
+24 |         if last_close > ema:
+25 |             return self.signals[0]
+26 |         elif last_close < ema:
+27 |             return self.signals[1]
+28 |         elif last_close == ema:
+29 |             return self.signals[2]
+30 | 
+31 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+32 |         signals = {}
+33 |         for symbol, dataframe in universe.items():
+34 |             signal = self.evaluate_symbol(date, symbol, dataframe, window=kwargs['window'])
+35 |             signals[symbol] = signal
+36 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/naives.py
+File: strategy/strategies/naives.py
+Size: 1350
+Last modified: 1705000166.2558477
+Last accessed: 1705000166.9234228
+Created: 1705000166.2558477
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import random as r
+1 | 
+2 | import pandas as pd
+3 | 
+4 | 
+5 | class NaiveLongShortStrategy:
+6 |     """
+7 |     Naive long/short strategy. This strategy is used to benchmark the backtesting engine.
+8 |     """
+9 |     def __init__(self):
+10 |         self.name = 'NaiveLongShortStrategy'
+11 |         self.description = 'Naive long/short strategy. This strategy is used to benchmark the backtesting engine.'
+12 |         self.signals = [
+13 |             'up',
+14 |             'down',
+15 |             'hold',
+16 |         ]
+17 | 
+18 |     def evaluate_symbol(self, date, symbol, dataframe, window=10):
+19 |         window = int(window)
+20 |         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+21 |             return self.signals[2]
+22 |         price_today = dataframe[dataframe['Date'] == date]['Close'].values[0]
+23 |         price_30_days_ago = dataframe[dataframe['Date'] == date - pd.Timedelta(days=window)]['Close'].values[0]
+24 |         if price_today > price_30_days_ago:
+25 |             return self.signals[0]
+26 |         elif price_today < price_30_days_ago:
+27 |             return self.signals[1]
+28 |         else:
+29 |             return self.signals[2]
+30 | 
+31 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+32 |         signals = {}
+33 |         for symbol, dataframe in universe.items():
+34 |             signal = self.evaluate_symbol(date, symbol, dataframe, kwargs['window'])
+35 |             signals[symbol] = signal
+36 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/gpt_4.py
+File: strategy/strategies/gpt_4.py
+Size: 2813
+Last modified: 1704998778.310955
+Last accessed: 1704998780.316514
+Created: 1704998778.310955
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | from strategy.clients.GPTClient import GPTClient
+1 | 
+2 | GPT_PROMPT = """
+3 |     You are a stock trader. You are trying to decide whether to buy or sell a stock for a long/short
+4 |     trading algorithm. For each stock, you have a dataframe of historical data. The dataframe has
+5 |     columns for the Date, Open, High, Low, Close, and Volume.
+6 | 
+7 |     You want to use the historical data to predict whether the stock will go up or down in the future.
+8 | 
+9 |     Based on your interpretation, you will return a signal to the backtesting engine.
+10 |     Your response MUST ONLY be one of the following:
+11 |     - up
+12 |     - down
+13 |     - hold
+14 | 
+15 |     Your response must not include any special characters or any additional strings. You must only
+16 |     return one of the three options above, and NOTHING ELSE!
+17 | 
+18 |     Example-1:
+19 |     '''
+20 |     up
+21 |     '''
+22 | 
+23 |     Example-2:
+24 |     '''
+25 |     down
+26 |     '''
+27 | 
+28 |     Example-3:
+29 |     '''
+30 |     hold
+31 |     '''
+32 | 
+33 |     ---
+34 | 
+35 |     Invalid Example-1:
+36 |     '''
+37 |     I think the stock will go up. My answer is 'up'.
+38 |     '''
+39 | 
+40 |     Invalid Example-2:
+41 |     '''
+42 |     Sure! I will share my answer with you. It's 'down'.
+43 |     '''
+44 | 
+45 |     Invalid Example-3:
+46 |     '''
+47 |     I think the stock will go up. My answer is 'up'. I am sure about it.
+48 |     '''
+49 | """
+50 | 
+51 | 
+52 | class GPT_4LongShortStrategy:
+53 |     """
+54 |     GPT-4 long/short strategy.
+55 |     """
+56 |     def __init__(self):
+57 |         self.name = 'GPT4LongShortStrategy'
+58 |         self.description = 'GPT-4 long/short strategy.'
+59 |         self.signals = [
+60 |             'up',
+61 |             'down',
+62 |             'hold',
+63 |         ]
+64 |         self.gpt_client = GPTClient()
+65 |         self.gpt_client.build_assistant(name="biyond-stock-gpt4",
+66 |                                         instructions=GPT_PROMPT,
+67 |                                         model="gpt-4",
+68 |                                         max_tokens=5,
+69 |                                         temperature=0.5)
+70 |         self.assistant = self.gpt_client.get_assistant(name="biyond-stock-gpt4")
+71 | 
+72 |     def evaluate_symbol(self, date, symbol, dataframe):
+73 |         message = f"""
+74 |                     CURRENT DATE: {str(date)}
+75 |                     SYMBOL: {symbol}
+76 |                     DATAFRAME:
+77 |                     {str(dataframe)}
+78 |                 """
+79 |         response = self.assistant.ask(message)
+80 |         if response not in self.signals:
+81 |             return self.signals[2]
+82 |         return response
+83 | 
+84 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+85 |         signals = {}
+86 |         count_hard_limit = 0
+87 |         lookback_limit = kwargs['lookback_limit']
+88 |         for symbol, dataframe in universe.items():
+89 |             cp = dataframe.iloc[-lookback_limit:]
+90 |             if count_hard_limit > kwargs['hard_limit']:
+91 |                 break
+92 |             signal = self.evaluate_symbol(date, symbol, cp)
+93 |             signals[symbol] = signal
+94 |             count_hard_limit += 1
+95 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/deep_neural.py
+File: strategy/strategies/deep_neural.py
+Size: 2016
+Last modified: 1705000166.245313
+Last accessed: 1705000166.548663
+Created: 1705000166.245313
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | from keras.models import Sequential
+1 | from keras.layers import Dense
+2 | from keras.optimizers import Adam
+3 | import pandas as pd
+4 | import numpy as np
+5 | 
+6 | 
+7 | class DeepLongShortStrategy:
+8 |     """
+9 |     Deep Long/Short strategy.
+10 |     """
+11 |     def __init__(self):
+12 |         self.name = 'DeepLongShortStrategy'
+13 |         self.description = 'Deep Long/Short strategy.'
+14 |         self.signals = [
+15 |             'down',
+16 |             'up',
+17 |             'hold',
+18 |         ]
+19 |         self.model = Sequential([
+20 |             Dense(64, input_dim=5, activation='relu'),
+21 |             Dense(32, activation='relu'),
+22 |             Dense(1, activation='sigmoid')
+23 |         ])
+24 | 
+25 |     def evaluate_symbol(self, date, symbol, dataframe, training_data_limit=10, learning_rate=0.001, epochs=3):
+26 |         dataframe = dataframe.copy()
+27 |         dataframe = dataframe[dataframe['Date'] < date]
+28 |         if not date - pd.Timedelta(days=training_data_limit) in dataframe['Date'].values:
+29 |             return self.signals[2]
+30 |         X = dataframe[['Open', 'High', 'Low', 'Close', 'Volume']][:-1]
+31 |         X_shifted = X.shift(1).fillna(0)
+32 |         y = X['Close'] > X_shifted['Close']
+33 |         if len(dataframe) < training_data_limit:
+34 |             self.model.compile(optimizer=Adam(learning_rate=learning_rate), loss='binary_crossentropy',
+35 |                                metrics=['accuracy'])
+36 |             self.model.fit(X, y, epochs=epochs, verbose=0)
+37 | 
+38 |             return self.signals[2]
+39 |         last_row = dataframe.tail(1)
+40 |         X_pred = last_row[['Open', 'High', 'Low', 'Close', 'Volume']]
+41 |         y_pred = self.model.predict(X_pred, verbose=0) > 0.5
+42 |         return self.signals[1] if y_pred[0][0] else self.signals[0]
+43 | 
+44 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+45 |         signals = {}
+46 |         for symbol, dataframe in universe.items():
+47 |             signal = self.evaluate_symbol(date, symbol, dataframe,
+48 |                                           learning_rate=kwargs['learning_rate'], epochs=kwargs['epochs'])
+49 |             signals[symbol] = signal
+50 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/sma.py
+File: strategy/strategies/sma.py
+Size: 1250
+Last modified: 1705000166.2886424
+Last accessed: 1705000167.619231
+Created: 1705000166.2886424
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | class SMALongShortStrategy:
+4 |     """
+5 |     Simple moving average long/short strategy.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'SMALongShortStrategy'
+9 |         self.description = 'Simple moving average long/short strategy.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     def evaluate_symbol(self, date, symbol, dataframe, window=10):
+17 |         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+18 |             return self.signals[2]
+19 |         dataframe = dataframe.copy()
+20 |         dataframe = dataframe[dataframe['Date'] < date]
+21 |         last_10_days = dataframe.tail(window)
+22 |         sma = last_10_days['Close'].mean()
+23 |         last_close = last_10_days['Close'].iloc[-1]
+24 |         if last_close > sma:
+25 |             return self.signals[0]
+26 |         elif last_close < sma:
+27 |             return self.signals[1]
+28 |         elif last_close == sma:
+29 |             return self.signals[2]
+30 | 
+31 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+32 |         signals = {}
+33 |         for symbol, dataframe in universe.items():
+34 |             signal = self.evaluate_symbol(date, symbol, dataframe, window=kwargs['window'])
+35 |             signals[symbol] = signal
+36 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/rsi.py
+File: strategy/strategies/rsi.py
+Size: 1739
+Last modified: 1705000166.251297
+Last accessed: 1705000166.9076731
+Created: 1705000166.251297
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | class RSILongShortStrategy:
+4 |     """
+5 |     Relative Strength Index long/short strategy.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'RSILongShortStrategy'
+9 |         self.description = 'Relative Strength Index long/short strategy.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     def evaluate_symbol(self, date, symbol, dataframe, window=14, down_threshold=30, up_threshold=70):
+17 |         window = int(window)
+18 |         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+19 |             return self.signals[2]
+20 |         last_14_days = dataframe[dataframe['Date'] >= date - pd.Timedelta(days=window)]
+21 |         changes = last_14_days['Close'].diff()
+22 |         positive_change = changes[changes >= 0].sum()
+23 |         negative_change = changes[changes < 0].sum()
+24 |         average_gain = positive_change / window
+25 |         average_loss = negative_change / window
+26 |         relative_strength = average_gain / average_loss if average_loss != 0 else 0
+27 |         relative_strength_index = 100.0 - (100.0 / (1.0 + relative_strength) if (1.0 + relative_strength) != 0 else 0)
+28 |         if relative_strength_index > up_threshold:
+29 |             return self.signals[0]
+30 |         elif relative_strength_index < down_threshold:
+31 |             return self.signals[1]
+32 |         else:
+33 |             return self.signals[2]
+34 | 
+35 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+36 |         signals = {}
+37 |         for symbol, dataframe in universe.items():
+38 |             signal = self.evaluate_symbol(date, symbol, dataframe,
+39 |                                           kwargs['window'], kwargs['down_threshold'], kwargs['up_threshold'])
+40 |             signals[symbol] = signal
+41 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/randoms.py
+File: strategy/strategies/randoms.py
+Size: 666
+Last modified: 1704937073.1910198
+Last accessed: 1704937075.3176732
+Created: 1704937073.1910198
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import random as r
+1 | 
+2 | 
+3 | class RandomLongShortStrategy:
+4 |     """
+5 |     Random long/short strategy. This strategy is used to test the backtesting engine.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'RandomLongShortStrategy'
+9 |         self.description = 'Random long/short strategy. This strategy is used to test the backtesting engine.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+17 |         signals = {}
+18 |         for symbol, _ in universe.items():
+19 |             signal = r.choice(self.signals)
+20 |             signals[symbol] = signal
+21 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/forest.py
+File: strategy/strategies/forest.py
+Size: 1893
+Last modified: 1705000166.2628026
+Last accessed: 1705000167.1640103
+Created: 1705000166.2628026
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | from sklearn.ensemble import RandomForestClassifier
+2 | 
+3 | class ForestLongShortStrategy:
+4 |     """
+5 |     Forest long/short strategy.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'ForestLongShortStrategy'
+9 |         self.description = 'Forest long/short strategy.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 |         self.classifier = None
+16 | 
+17 |     def evaluate_symbol(self, date, symbol, dataframe, training_data_limit=20, n_estimators=10):
+18 |         if not date - pd.Timedelta(days=training_data_limit) in dataframe['Date'].values:
+19 |             return self.signals[2]
+20 |         dataframe = dataframe.copy()
+21 |         dataframe = dataframe[dataframe['Date'] < date]
+22 |         if len(dataframe) < training_data_limit:
+23 |             return self.signals[2]
+24 | 
+25 |         elif len(dataframe) == training_data_limit:
+26 |             clf = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
+27 |             X = dataframe[['Open', 'High', 'Low', 'Close', 'Volume']][:-1]
+28 |             X_shifted = X.shift(1)
+29 |             X_shifted.fillna(0, inplace=True)
+30 |             y = X['Close'] > X_shifted['Close']
+31 |             self.classifier = clf.fit(X, y)
+32 | 
+33 |         last_row = dataframe.tail(1)
+34 |         X_pred = last_row[['Open', 'High', 'Low', 'Close', 'Volume']]
+35 |         y_pred = self.classifier.predict(X_pred)
+36 |         if y_pred[0]:
+37 |             return self.signals[1]
+38 |         else:
+39 |             return self.signals[0]
+40 | 
+41 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+42 |         signals = {}
+43 |         for symbol, dataframe in universe.items():
+44 |             signal = self.evaluate_symbol(date, symbol, dataframe,
+45 |                                           training_data_limit=kwargs['training_data_limit'],
+46 |                                           n_estimators=kwargs['n_estimators'])
+47 |             signals[symbol] = signal
+48 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/gpt3_5.py
+File: strategy/strategies/gpt3_5.py
+Size: 2865
+Last modified: 1704998778.3090496
+Last accessed: 1704998779.6129248
+Created: 1704998778.3090496
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | from strategy.clients.GPTClient import GPTClient
+3 | 
+4 | GPT_PROMPT = """
+5 |     You are a stock trader. You are trying to decide whether to buy or sell a stock for a long/short
+6 |     trading algorithm. For each stock, you have a dataframe of historical data. The dataframe has
+7 |     columns for the Date, Open, High, Low, Close, and Volume.
+8 |     
+9 |     You want to use the historical data to predict whether the stock will go up or down in the future.
+10 |     
+11 |     Based on your interpretation, you will return a signal to the backtesting engine.
+12 |     Your response MUST ONLY be one of the following:
+13 |     - up
+14 |     - down
+15 |     - hold
+16 |     
+17 |     Your response must not include any special characters or any additional strings. You must only
+18 |     return one of the three options above, and NOTHING ELSE!
+19 |     
+20 |     Example-1:
+21 |     '''
+22 |     up
+23 |     '''
+24 |     
+25 |     Example-2:
+26 |     '''
+27 |     down
+28 |     '''
+29 |     
+30 |     Example-3:
+31 |     '''
+32 |     hold
+33 |     '''
+34 |     
+35 |     ---
+36 |     
+37 |     Invalid Example-1:
+38 |     '''
+39 |     I think the stock will go up. My answer is 'up'.
+40 |     '''
+41 |     
+42 |     Invalid Example-2:
+43 |     '''
+44 |     Sure! I will share my answer with you. It's 'down'.
+45 |     '''
+46 |     
+47 |     Invalid Example-3:
+48 |     '''
+49 |     I think the stock will go up. My answer is 'up'. I am sure about it.
+50 |     '''
+51 | """
+52 | 
+53 | 
+54 | class GPT_3_5LongShortStrategy:
+55 |     """
+56 |     GPT-3.5 long/short strategy.
+57 |     """
+58 | 
+59 |     def __init__(self):
+60 |         self.name = 'GPT3_5LongShortStrategy'
+61 |         self.description = 'GPT-3.5 long/short strategy.'
+62 |         self.signals = [
+63 |             'up',
+64 |             'down',
+65 |             'hold',
+66 |         ]
+67 |         self.gpt_client = GPTClient()
+68 |         self.gpt_client.build_assistant(name="biyond-stock-gpt3",
+69 |                                         instructions=GPT_PROMPT,
+70 |                                         model="gpt-3.5-turbo",
+71 |                                         max_tokens=5,
+72 |                                         temperature=0.5)
+73 |         self.assistant = self.gpt_client.get_assistant(name="biyond-stock-gpt3")
+74 | 
+75 |     def evaluate_symbol(self, date, symbol, dataframe: pd.DataFrame):
+76 |         message = f"""
+77 |             CURRENT DATE: {str(date)}
+78 |             SYMBOL: {symbol}
+79 |             DATAFRAME:
+80 |             {str(dataframe)}
+81 |         """
+82 |         response = self.assistant.ask(message)
+83 |         if response not in self.signals:
+84 |             return self.signals[2]
+85 |         return response
+86 | 
+87 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+88 |         signals = {}
+89 |         count_hard_limit = 0
+90 |         lookback_limit = kwargs['lookback_limit']
+91 |         for symbol, dataframe in universe.items():
+92 |             cp = dataframe.iloc[-lookback_limit:]
+93 |             if count_hard_limit > kwargs['hard_limit']:
+94 |                 break
+95 |             signal = self.evaluate_symbol(date, symbol, cp)
+96 |             signals[symbol] = signal
+97 |             count_hard_limit += 1
+98 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/strategies/bollinger.py
+File: strategy/strategies/bollinger.py
+Size: 1378
+Last modified: 1705000166.2798264
+Last accessed: 1705000167.6243157
+Created: 1705000166.2798264
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | class BollingerLongShortStrategy:
+4 |     """
+5 |     Boilinger Bands long/short strategy.
+6 |     """
+7 |     def __init__(self):
+8 |         self.name = 'BoilingerLongShortStrategy'
+9 |         self.description = 'Boilinger Bands long/short strategy.'
+10 |         self.signals = [
+11 |             'up',
+12 |             'down',
+13 |             'hold',
+14 |         ]
+15 | 
+16 |     def evaluate_symbol(self, date, symbol, dataframe, window=20, k=2):
+17 |         if not date - pd.Timedelta(days=window) in dataframe['Date'].values:
+18 |             return self.signals[2]
+19 |         dataframe = dataframe.copy()
+20 |         dataframe = dataframe[dataframe['Date'] < date]
+21 |         last_20_days = dataframe.tail(window)
+22 |         sma = last_20_days['Close'].mean()
+23 |         std = last_20_days['Close'].std()
+24 |         upper_band = sma + k * std
+25 |         lower_band = sma - k * std
+26 |         last_close = last_20_days['Close'].iloc[-1]
+27 |         if last_close > upper_band:
+28 |             return self.signals[0]
+29 |         elif last_close < lower_band:
+30 |             return self.signals[1]
+31 |         else:
+32 |             return self.signals[2]
+33 | 
+34 |     def generate_signals(self, date, universe, portfolio, **kwargs):
+35 |         signals = {}
+36 |         for symbol, dataframe in universe.items():
+37 |             signal = self.evaluate_symbol(date, symbol, dataframe, window=kwargs['window'], k=kwargs['k'])
+38 |             signals[symbol] = signal
+39 |         return signals
+<CONTENT END>
+
+========================================METADATAPath: strategy/models/HyperParameters.py
+File: strategy/models/HyperParameters.py
+Size: 1195
+Last modified: 1705000166.2725725
+Last accessed: 1705000167.1701121
+Created: 1705000166.2725725
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | 
+1 | class HyperParameters:
+2 |     class Fund:
+3 |         initial_cash = 1_000_000  # initial cash
+4 |         risk_free_rate = 0.01  # 1% per annum risk free rate
+5 |         safety_margin = 5  # 500% of the initial cash
+6 | 
+7 |         transaction_volume = 80  # N of shares per transaction
+8 |         trade_frequency = 1  # Every N days
+9 |         gpt_trade_frequency = 15  # Every N days for GPT requests
+10 | 
+11 |         transaction_cost = 0.002  # N% of the transaction volume
+12 | 
+13 |         transaction_volume_change_aggression = 0.05  # N% of the transaction volume - 0.0 means no change
+14 |         transaction_volume_adjustment_window = 20  # N days
+15 |         transaction_volume_minimum = 10  # min N of shares per transaction
+16 |         transaction_volume_maximum = 150  # max N of shares per transaction
+17 | 
+18 |     class Data:
+19 |         universe_size = 5
+20 |         symbols = []
+21 | 
+22 |     ###############################################################
+23 |     # Redundant for direct datasets / non-training based datasets
+24 |     ###############################################################
+25 |     class Train:
+26 |         start_date = '2018-01-01'
+27 |         end_date = '2019-12-31'
+28 | 
+29 |     class Test:
+30 |         start_date = '2021-01-01'
+31 |         end_date = '2022-01-01'
+<CONTENT END>
+
+========================================METADATAPath: strategy/models/Portfolio.py
+File: strategy/models/Portfolio.py
+Size: 19333
+Last modified: 1705055306.7514102
+Last accessed: 1705055308.6441808
+Created: 1705055306.7514102
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import os
+1 | 
+2 | import numpy as np
+3 | from matplotlib import pyplot as plt
+4 | 
+5 | from strategy.risk import RiskToleranceManager
+6 | 
+7 | # TRADE_DAYS_IN_YEAR = 252
+8 | TRADE_DAYS_IN_YEAR = 365
+9 | 
+10 | 
+11 | class Portfolio:
+12 |     def __init__(self, initial_cash, transaction_quantity, margin=0.2, risk_free_rate=0):
+13 |         self.cash = initial_cash
+14 |         self.transaction_quantity = transaction_quantity
+15 |         self.positions = {}
+16 |         self.negative_margin = margin
+17 | 
+18 |         self.initial_cash = initial_cash
+19 |         self.current_portfolio_value = 0
+20 |         self.current_asset_value = 0
+21 |         self.risk_free_rate = risk_free_rate
+22 | 
+23 |         # metrics
+24 |         self.daily_return = 0
+25 |         self.daily_return_std = 0
+26 |         self.daily_excess_return = 0
+27 |         self.cumulative_return = 0
+28 |         self.sharpe_ratio = 0
+29 |         self.max_drawdown = 0
+30 | 
+31 |         self.initial_benchmark = None
+32 |         self.current_benchmark = 0
+33 |         self.bm_daily_return = 0
+34 |         self.bm_daily_return_std = 0
+35 |         self.bm_daily_excess_return = 0
+36 |         self.bm_cumulative_return = 0
+37 |         self.bm_sharpe_ratio = 0
+38 | 
+39 |         # history
+40 |         self.portfolio_history = []
+41 |         self.transaction_history = []
+42 | 
+43 |     def assign_upward(self, ticker, price, date, transaction_cost=0.0, risk_tolerance=0.0,
+44 |                       returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=100):
+45 |         r = ""
+46 |         if ticker not in self.positions:
+47 |             self.positions[ticker] = 0
+48 |         new_quantity = RiskToleranceManager.adjust_transaction_volume(
+49 |             portfolio_value=self.current_portfolio_value,
+50 |             initial_portfolio_value=self.initial_cash,
+51 |             cash=self.cash,
+52 |             initial_cash=self.initial_cash,
+53 |             current_transaction_volume=self.transaction_quantity,
+54 |             daily_returns=[x["daily_return"] for x in self.portfolio_history],
+55 |             risk_tolerance=risk_tolerance,
+56 |             returns_window=returns_window,
+57 |             minimum_transaction_volume=minimum_transaction_volume,
+58 |             maximum_transaction_volume=maximum_transaction_volume
+59 |         )
+60 |         if self.transaction_quantity != new_quantity:
+61 |             self.transaction_quantity = new_quantity
+62 |         if self.positions[ticker] > 0:
+63 |             r = self.hold(ticker, price, date, transaction_cost=transaction_cost)
+64 |         elif self.positions[ticker] < 0:
+65 |             r = self.cover(ticker, price, date, transaction_cost=transaction_cost)
+66 |         elif self.positions[ticker] == 0:
+67 |             r = self.buy(ticker, price, date, transaction_cost=transaction_cost)
+68 |         else:
+69 |             print("Indescribable action.")
+70 |             return r
+71 |         if r is not None and type(r) == str and r == "BANKRUPT":
+72 |             return "BANKRUPT"
+73 |         return r
+74 | 
+75 |     def assign_downward(self, ticker, price, date, transaction_cost=0.0, risk_tolerance=0.0,
+76 |                         returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=100):
+77 |         r = None
+78 |         if ticker not in self.positions:
+79 |             self.positions[ticker] = 0
+80 |         new_quantity = RiskToleranceManager.adjust_transaction_volume(
+81 |             portfolio_value=self.current_portfolio_value,
+82 |             initial_portfolio_value=self.initial_cash,
+83 |             cash=self.cash,
+84 |             initial_cash=self.initial_cash,
+85 |             current_transaction_volume=self.transaction_quantity,
+86 |             daily_returns=[x["daily_return"] for x in self.portfolio_history],
+87 |             risk_tolerance=risk_tolerance,
+88 |             returns_window=returns_window,
+89 |             minimum_transaction_volume=minimum_transaction_volume,
+90 |             maximum_transaction_volume=maximum_transaction_volume
+91 |         )
+92 |         if self.transaction_quantity != new_quantity:
+93 |             self.transaction_quantity = new_quantity
+94 |         if self.positions.get(ticker, 0) > 0:
+95 |             r = self.sell(ticker, price, date, transaction_cost=transaction_cost)
+96 |         elif self.positions[ticker] < 0:
+97 |             r = self.hold(ticker, price, date, transaction_cost=transaction_cost)
+98 |         elif self.positions[ticker] == 0:
+99 |             r = self.short(ticker, price, date, transaction_cost=transaction_cost)
+100 |         else:
+101 |             print("Indescribable action.")
+102 |             return r
+103 |         if r is not None and type(r) == str and r == "BANKRUPT":
+104 |             return r
+105 |         return r
+106 | 
+107 |     def assign_hold(self, ticker, price, date, transaction_cost=0.0, risk_tolerance=0.0,
+108 |                     returns_window=20, minimum_transaction_volume=10, maximum_transaction_volume=100):
+109 |         r = self.hold(ticker, price, date)
+110 |         if r is not None and type(r) == str and r == "BANKRUPT":
+111 |             return r
+112 |         new_quantity = RiskToleranceManager.adjust_transaction_volume(
+113 |             portfolio_value=self.current_portfolio_value,
+114 |             initial_portfolio_value=self.initial_cash,
+115 |             cash=self.cash,
+116 |             initial_cash=self.initial_cash,
+117 |             current_transaction_volume=self.transaction_quantity,
+118 |             daily_returns=[x["daily_return"] for x in self.portfolio_history],
+119 |             risk_tolerance=risk_tolerance,
+120 |             returns_window=returns_window,
+121 |             minimum_transaction_volume=minimum_transaction_volume,
+122 |             maximum_transaction_volume=maximum_transaction_volume
+123 |         )
+124 |         if self.transaction_quantity != new_quantity:
+125 |             self.transaction_quantity = new_quantity
+126 |         return r
+127 | 
+128 |     def hold(self, ticker, price, date, transaction_cost=0.0):
+129 |         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
+130 |             return "BANKRUPT"
+131 |         self.transaction_history.append({
+132 |             "date": date,
+133 |             "ticker": ticker,
+134 |             "action": "hold",
+135 |             "price": price,
+136 |             "quantity": 0,
+137 |             "total_cost": 0,
+138 |         })
+139 | 
+140 |     def buy(self, ticker, price, date, transaction_cost=0.0):
+141 |         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
+142 |             return "BANKRUPT"
+143 | 
+144 |         cost = price * self.transaction_quantity
+145 |         if cost <= self.cash:
+146 |             self.cash -= cost + (cost * transaction_cost)
+147 |             self.positions[ticker] = self.positions.get(ticker, 0) + self.transaction_quantity
+148 |             self.transaction_history.append({
+149 |                 "date": date,
+150 |                 "ticker": ticker,
+151 |                 "action": "buy",
+152 |                 "price": price,
+153 |                 "quantity": self.transaction_quantity,
+154 |                 "total_cost": price * self.transaction_quantity,
+155 |             })
+156 |         else:
+157 |             self.hold(ticker, price, date)
+158 | 
+159 |     def sell(self, ticker, price, date, transaction_cost=0.0):
+160 |         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
+161 |             return "BANKRUPT"
+162 |         if self.positions.get(ticker, 0) >= self.transaction_quantity:
+163 |             self.positions[ticker] -= self.transaction_quantity
+164 |             self.cash += (price * self.transaction_quantity) - (price * self.transaction_quantity * transaction_cost)
+165 |             self.transaction_history.append({
+166 |                 "date": date,
+167 |                 "ticker": ticker,
+168 |                 "action": "sell",
+169 |                 "price": price,
+170 |                 "quantity": self.transaction_quantity,
+171 |                 "total_cost": price * self.transaction_quantity,
+172 |             })
+173 |         else:
+174 |             self.short(ticker, price, date)
+175 | 
+176 |     def short(self, ticker, price, date, transaction_cost=0.0):
+177 |         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
+178 |             return "BANKRUPT"
+179 |         self.positions[ticker] = self.positions.get(ticker, 0) - self.transaction_quantity
+180 |         self.cash += (price * self.transaction_quantity) - (price * self.transaction_quantity * transaction_cost)
+181 |         self.transaction_history.append({
+182 |             "date": date,
+183 |             "ticker": ticker,
+184 |             "action": "short",
+185 |             "price": price,
+186 |             "quantity": self.transaction_quantity,
+187 |             "total_cost": price * self.transaction_quantity,
+188 |         })
+189 | 
+190 |     def cover(self, ticker, price, date, transaction_cost=0.0):
+191 |         if self.current_portfolio_value <= (0 - (max(self.cash, self.initial_cash) * self.negative_margin)):
+192 |             return "BANKRUPT"
+193 |         if self.positions.get(ticker, 0) <= -self.transaction_quantity:
+194 |             self.positions[ticker] += self.transaction_quantity
+195 |             self.cash -= (price * self.transaction_quantity) + (price * self.transaction_quantity * transaction_cost)
+196 |             self.transaction_history.append({
+197 |                 "date": date,
+198 |                 "ticker": ticker,
+199 |                 "action": "cover",
+200 |                 "price": price,
+201 |                 "quantity": self.transaction_quantity,
+202 |                 "total_cost": price * self.transaction_quantity,
+203 |             })
+204 |         else:
+205 |             self.sell(ticker, price, date)
+206 | 
+207 |     def portfolio_value(self, current_prices, benchmark: float, date):
+208 |         value = self.cash
+209 |         for ticker, quantity in self.positions.items():
+210 |             value += quantity * current_prices[ticker]
+211 |         self.current_portfolio_value = value
+212 |         self.current_asset_value = value - self.cash
+213 |         self.current_benchmark = benchmark / len(current_prices)
+214 |         self.calculate_metrics()
+215 |         if self.initial_benchmark is None:
+216 |             self.initial_benchmark = self.current_benchmark
+217 |         self.portfolio_history.append({
+218 |             "date": date,
+219 |             "portfolio_value": self.current_portfolio_value,
+220 |             "asset_value": self.current_asset_value,
+221 |             "cash": self.cash,
+222 |             "positions": self.positions,
+223 | 
+224 |             # metrics
+225 |             "daily_return": self.daily_return,
+226 |             "daily_return_std": self.daily_return_std,
+227 |             "daily_excess_return": self.daily_excess_return,
+228 |             "cumulative_return": self.cumulative_return,
+229 |             "sharpe_ratio": self.sharpe_ratio,
+230 |             "max_drawdown": self.max_drawdown,
+231 | 
+232 |             # benchmark
+233 |             "bm_daily_return": self.bm_daily_return,
+234 |             "bm_daily_return_std": self.bm_daily_return_std,
+235 |             "bm_daily_excess_return": self.bm_daily_excess_return,
+236 |             "bm_cumulative_return": self.bm_cumulative_return,
+237 |             "bm_sharpe_ratio": self.bm_sharpe_ratio,
+238 |             "bm_initial_value": self.initial_benchmark,
+239 |             "bm_current_value": self.current_benchmark,
+240 |         })
+241 |         return value
+242 | 
+243 |     def calculate_metrics(self):
+244 |         # portfolio metrics
+245 |         self.daily_return = (self.current_portfolio_value - self.portfolio_history[-1]["portfolio_value"]) / self.portfolio_history[-1]["portfolio_value"] if len(self.portfolio_history) != 0 else 0
+246 |         self.daily_return_std = np.std([x["daily_return"] for x in self.portfolio_history]) if len(self.portfolio_history) != 0 else 0
+247 |         self.daily_excess_return = self.daily_return - (self.risk_free_rate / TRADE_DAYS_IN_YEAR)
+248 |         self.cumulative_return = self.current_portfolio_value / self.initial_cash - 1 if len(self.portfolio_history) != 0 else 0
+249 |         self.sharpe_ratio = self.daily_excess_return / self.daily_return_std if self.daily_return_std != 0 else 0
+250 |         self.max_drawdown = self.portfolio_history[-1]["portfolio_value"] if len(self.portfolio_history) != 0 else 0 / \
+251 |                             max([x["portfolio_value"] for x in self.portfolio_history] if self.portfolio_history != [] else [1])
+252 | 
+253 |         # benchmark metrics
+254 |         self.bm_daily_return = (((self.current_benchmark -
+255 |                                   self.portfolio_history[-1]["bm_current_value"]) if len(self.portfolio_history) != 0 else 0) /
+256 |                                 self.current_benchmark)
+257 |         self.bm_daily_return_std = np.std([x["bm_daily_return"] for x in self.portfolio_history]) if len(self.portfolio_history) != 0 else 0
+258 |         self.bm_daily_excess_return = self.bm_daily_return - (self.risk_free_rate / TRADE_DAYS_IN_YEAR)
+259 |         self.bm_cumulative_return = self.current_benchmark / self.initial_benchmark - 1 if len(self.portfolio_history) != 0 else 0
+260 |         self.bm_sharpe_ratio = self.bm_daily_excess_return / self.bm_daily_return_std if self.bm_daily_return_std != 0 else 0
+261 | 
+262 |     def visualize_metrics(self, strategy_name):
+263 | 
+264 |         # save metrics to files
+265 |         if not os.path.exists("strategy/records/" + strategy_name):
+266 |             os.makedirs("strategy/records/" + strategy_name)
+267 | 
+268 |         # calculate average daily return
+269 |         average_daily_return = sum([x["daily_return"] for x in self.portfolio_history]) / len(self.portfolio_history)
+270 |         average_daily_return_std = np.std([x["daily_return"] for x in self.portfolio_history])
+271 |         average_daily_excess_return = sum([x["daily_excess_return"] for x in self.portfolio_history]) / len(self.portfolio_history)
+272 |         f_cumulative_return = self.portfolio_history[-1]["cumulative_return"]
+273 |         average_sharpe_ratio = sum([x["sharpe_ratio"] for x in self.portfolio_history]) / len(self.portfolio_history)
+274 |         f_maximum_drawdown = self.portfolio_history[-1]["max_drawdown"]
+275 | 
+276 |         with open("strategy/records/" + strategy_name + "/metrics.txt", "w") as f:
+277 |             f.write("**Cumulative Return:** " + str(f_cumulative_return) + "\n")
+278 |             f.write("**Average Daily Return:** " + str(average_daily_return) + "\n")
+279 |             f.write("**Average Daily Excess Return:** " + str(average_daily_excess_return) + "\n")
+280 |             f.write("**Average Daily Return Standard Deviation:** " + str(average_daily_return_std) + "\n")
+281 |             f.write("**Sharpe Ratio:** " + str(average_sharpe_ratio) + "\n")
+282 |             f.write("**Maximum Drawdown:** " + str(f_maximum_drawdown) + "\n")
+283 | 
+284 |         adj = 6
+285 |         adj_number_of_assets = len(self.portfolio_history[0]["positions"]) / adj
+286 |         if not os.path.exists("strategy/results/" + strategy_name):
+287 |             os.makedirs("strategy/results/" + strategy_name)
+288 | 
+289 |         plt.plot([x["date"] for x in self.portfolio_history], [x["portfolio_value"] for x in self.portfolio_history],
+290 |                  label="Portfolio Value")
+291 |         plt.plot([x["date"] for x in self.portfolio_history], [x["cash"] for x in self.portfolio_history],
+292 |                  label="Cash")
+293 |         plt.plot([x["date"] for x in self.portfolio_history], [x["asset_value"] for x in self.portfolio_history],
+294 |                  label="Asset Value")
+295 |         plt.xlabel("Date")
+296 |         plt.ylabel("Value ($)")
+297 |         plt.xticks(rotation=45)
+298 |         plt.title("Portfolio Value, Cash and Asset Value")
+299 |         plt.legend()
+300 |         plt.grid()
+301 |         plt.savefig("strategy/results/" + strategy_name + "/portfolio_value_cash_asset_value.png")
+302 |         plt.clf()
+303 | 
+304 |         plt.plot([x["date"] for x in self.portfolio_history], [x["daily_return"] for x in self.portfolio_history],
+305 |                  label="Daily Return")
+306 |         plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_return"]/adj_number_of_assets  for x in self.portfolio_history],
+307 |                  label="Benchmark")
+308 |         plt.xlabel("Date")
+309 |         plt.ylabel("Daily Return")
+310 |         plt.xticks(rotation=45)
+311 |         plt.title("Daily Returns")
+312 |         plt.legend()
+313 |         plt.grid()
+314 |         plt.savefig("strategy/results/" + strategy_name + "/daily_returns.png")
+315 |         plt.clf()
+316 | 
+317 |         plt.plot([x["date"] for x in self.portfolio_history], [x["daily_return_std"] for x in self.portfolio_history],
+318 |                  label="Daily Return Std")
+319 |         plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_return_std"] for x in self.portfolio_history],
+320 |                  label="Benchmark")
+321 |         plt.xlabel("Date")
+322 |         plt.ylabel("Daily Return Std")
+323 |         plt.xticks(rotation=45)
+324 |         plt.title("Daily Return Std")
+325 |         plt.legend()
+326 |         plt.grid()
+327 |         plt.savefig("strategy/results/" + strategy_name + "/daily_return_std.png")
+328 |         plt.clf()
+329 | 
+330 |         plt.plot([x["date"] for x in self.portfolio_history], [x["daily_excess_return"] for x in self.portfolio_history],
+331 |                  label="Daily Excess Return")
+332 |         plt.plot([x["date"] for x in self.portfolio_history], [x["bm_daily_excess_return"]/adj_number_of_assets for x in self.portfolio_history],
+333 |                  label="Benchmark")
+334 |         plt.xlabel("Date")
+335 |         plt.ylabel("Daily Excess Return")
+336 |         plt.xticks(rotation=45)
+337 |         plt.title("Daily Excess Return")
+338 |         plt.legend()
+339 |         plt.grid()
+340 |         plt.savefig("strategy/results/" + strategy_name + "/daily_excess_return.png")
+341 |         plt.clf()
+342 | 
+343 |         plt.plot([x["date"] for x in self.portfolio_history], [
+344 |             x["cumulative_return"] for x in
+345 |             self.portfolio_history],
+346 |             label="Cumulative Return")
+347 |         plt.plot([x["date"] for x in self.portfolio_history], [
+348 |             x["bm_cumulative_return"]/adj_number_of_assets for x in
+349 |             self.portfolio_history],
+350 |                  label="Benchmark")
+351 |         plt.xlabel("Date")
+352 |         plt.ylabel("Cumulative Return")
+353 |         plt.xticks(rotation=45)
+354 |         plt.title("Cumulative Return")
+355 |         plt.legend()
+356 |         plt.grid()
+357 |         plt.savefig("strategy/results/" + strategy_name + "/cumulative_return.png")
+358 |         plt.clf()
+359 | 
+360 |         plt.plot([x["date"] for x in self.portfolio_history], [x["sharpe_ratio"] for x in self.portfolio_history],
+361 |                  label="Sharpe Ratio")
+362 |         plt.plot([x["date"] for x in self.portfolio_history], [x["bm_sharpe_ratio"] for x in self.portfolio_history],
+363 |                  label="Benchmark")
+364 |         plt.xlabel("Date")
+365 |         plt.ylabel("Sharpe Ratio")
+366 |         plt.xticks(rotation=45)
+367 |         plt.title("Sharpe Ratio")
+368 |         plt.legend()
+369 |         plt.grid()
+370 |         plt.savefig("strategy/results/" + strategy_name + "/sharpe_ratio.png")
+371 |         plt.clf()
+372 | 
+373 |         plt.plot([x["date"] for x in self.portfolio_history], [x["max_drawdown"] for x in self.portfolio_history],
+374 |                  label="Max Drawdown")
+375 |         plt.xlabel("Date")
+376 |         plt.ylabel("Max Drawdown")
+377 |         plt.xticks(rotation=45)
+378 |         plt.title("Max Drawdown")
+379 |         plt.legend()
+380 |         plt.grid()
+381 |         plt.savefig("strategy/results/" + strategy_name + "/max_drawdown.png")
+382 |         plt.clf()
+383 | 
+384 | 
+385 | if __name__ == "__main__":
+386 |     prices = np.random.normal(0, 1, 100000).cumsum()
+387 |     portfolio = Portfolio(1000, 100)
+388 |     for i, p in enumerate(prices):
+389 |         c = np.random.choice([0, 1, 2, 3, 4])
+390 |         if c == 0:
+391 |             r = portfolio.buy("AAPL", p, i)
+392 |         elif c == 1:
+393 |             r = portfolio.sell("AAPL", p, i)
+394 |         elif c == 2:
+395 |             r = portfolio.short("AAPL", p, i)
+396 |         elif c == 3:
+397 |             r = portfolio.cover("AAPL", p, i)
+398 |         else:
+399 |             r = portfolio.hold("AAPL", p, i)
+400 |         if r == "BANKRUPT":
+401 |             print("BANKRUPTCY, failing the simulation...")
+402 |             break
+403 |         print("Portfolio Value: ", portfolio.current_portfolio_value)
+404 |         print("Cash: ", portfolio.cash)
+405 |         print("Positions: ", portfolio.positions)
+406 |         print("Action: ", "buy" if c == 0 else "sell" if c == 1 else "hold")
+407 |         print()
+408 |     print("Final - Portfolio Value: ", portfolio.current_portfolio_value)
+409 |     print("Final - Cash: ", portfolio.cash)
+410 |     print("Final - Positions: ", portfolio.positions)
+411 |     print()
+<CONTENT END>
+
+========================================METADATAPath: strategy/risk/RiskToleranceManager.py
+File: strategy/risk/RiskToleranceManager.py
+Size: 2625
+Last modified: 1705000166.2853193
+Last accessed: 1705000167.6371546
+Created: 1705000166.2853193
+Owner: 501
+Group: 20
+Permissions: 33188
+ --- At the start of each line, there is a number that represents the line number, which is separated from content with '|'.
+========================================
+<CONTENT START>
+0 | import pandas as pd
+1 | 
+2 | 
+3 | def adjust_transaction_volume(portfolio_value, initial_portfolio_value, cash, initial_cash,
+4 |                               current_transaction_volume, daily_returns, risk_tolerance,
+5 |                               returns_window=20, minimum_transaction_volume=10,
+6 |                               maximum_transaction_volume=1000):
+7 |     daily_returns = pd.Series(daily_returns)
+8 |     internal_smooth__very_high = 1.0
+9 |     internal_smooth__high = 0.8
+10 |     internal_smooth__medium = 0.6
+11 |     internal_smooth__low = 0.4
+12 |     internal_smooth__very_low = 0.2
+13 |     internal_smooth__null = 0.0
+14 |     if portfolio_value > initial_portfolio_value:
+15 |         if cash > initial_cash:
+16 |             if daily_returns[-returns_window:].mean() > 0:
+17 |                 return min(max(int(current_transaction_volume * (1 + internal_smooth__very_high * risk_tolerance)),
+18 |                            minimum_transaction_volume), maximum_transaction_volume)
+19 |             else:
+20 |                 return min(max(int(current_transaction_volume * (1 + internal_smooth__high * risk_tolerance)),
+21 |                            minimum_transaction_volume), maximum_transaction_volume)
+22 |         else:
+23 |             if daily_returns[-returns_window:].mean() > 0:
+24 |                 return min(max(int(current_transaction_volume * (1 + internal_smooth__medium * risk_tolerance)),
+25 |                            minimum_transaction_volume), maximum_transaction_volume)
+26 |             else:
+27 |                 return min(max(int(current_transaction_volume * (1 + internal_smooth__low * risk_tolerance)),
+28 |                            minimum_transaction_volume), maximum_transaction_volume)
+29 |     else:
+30 |         if cash > initial_cash:
+31 |             if daily_returns[-returns_window:].mean() > 0:
+32 |                 return min(max(int(current_transaction_volume * (1 - internal_smooth__medium * risk_tolerance)),
+33 |                            minimum_transaction_volume), maximum_transaction_volume)
+34 |             else:
+35 |                 return min(max(int(current_transaction_volume * (1 - internal_smooth__low * risk_tolerance)),
+36 |                            minimum_transaction_volume), maximum_transaction_volume)
+37 |         else:
+38 |             if daily_returns[-returns_window:].mean() > 0:
+39 |                 return min(max(int(current_transaction_volume * (1 - internal_smooth__very_low * risk_tolerance)),
+40 |                            minimum_transaction_volume), maximum_transaction_volume)
+41 |             else:
+42 |                 return min(max(int(current_transaction_volume * (1 - internal_smooth__null * risk_tolerance)),
+43 |                            minimum_transaction_volume), maximum_transaction_volume)
+<CONTENT END>
+
