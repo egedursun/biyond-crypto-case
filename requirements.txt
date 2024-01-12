@@ -10,3 +10,4 @@ tensorflow~=2.15.0
 keras~=2.15.0
 streamlit~=1.30.0
 flask~=3.0.0
+tiktoken~=0.5.2
