@@ -2,7 +2,10 @@ from auto_documentation.analyzer import generate_report
 from strategy.models.HyperParameters import HyperParameters
 from strategy.strategy_interface import run
 
+########################################################################################################################
+# ANALYSIS MODE DEACTIVATES THE SIMULATION TRIGGERING WHEN SET 'True'
 ANALYSIS_MODE = True
+########################################################################################################################
 
 # Test set
 test_set = {

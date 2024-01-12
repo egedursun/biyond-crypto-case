@@ -148,7 +148,7 @@ def simulate(strategy, download_data=False, external_data=True, hyper_parameters
             p_values.append(cp.deepcopy(portfolio.positions))
 
         portfolio.visualize_metrics(strategy_name=inst.name)
-        visualize_stock_positions(p_values, smoothen_days=20)
+        visualize_stock_positions(p_values, smoothen_days=20, strategy_name=inst.name)
         cumulative_return_history = []
         for data in portfolio.portfolio_history:
             cumulative_return_history.append(data['portfolio_value'])
