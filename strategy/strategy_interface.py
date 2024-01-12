@@ -164,7 +164,7 @@ def run(hyper_parameters=HyperParameters, test_set=None):
         test_set = {
             "randoms": False,
             "naives": False,
-            "rsi": True,
+            "rsi": False,
             "macd": False,
             "sma": False,
             "ema": False,
@@ -224,7 +224,7 @@ def run(hyper_parameters=HyperParameters, test_set=None):
     if test_set["bollinger"]:
         bollinger_rets = simulate(strategy=bollinger.BollingerLongShortStrategy, download_data=False,
                                   external_data=True,
-                                  window=20, k=1,
+                                  window=15, k=0.5,
                                   hyper_parameters=hyper_parameters)
         overall_rets["bollinger"] = bollinger_rets
 
@@ -237,22 +237,22 @@ def run(hyper_parameters=HyperParameters, test_set=None):
     # Try the 'Alphas Long Short Strategies'
     if test_set["alphas"]["01"]:
         a01_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
-                            cmd="01", window=10, short_period=20, long_period=30,
+                            cmd="01", window=20, short_period=5, long_period=30,
                             hyper_parameters=hyper_parameters)
         overall_rets["a01"] = a01_rets
     if test_set["alphas"]["02"]:
         a02_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
-                            cmd="02", window=5, mean_window=10, volume_window=20, z_score_threshold=1.1,
+                            cmd="02", window=2, mean_window=2, volume_window=2, z_score_threshold=0.3,
                             hyper_parameters=hyper_parameters)
         overall_rets["a02"] = a02_rets
     if test_set["alphas"]["03"]:
         a03_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
-                            cmd="03", period=10, momentum_period=5, atr_period=5,
+                            cmd="03", period=20, momentum_period=20, atr_period=5,
                             hyper_parameters=hyper_parameters)
         overall_rets["a03"] = a03_rets
     if test_set["alphas"]["04"]:
         a04_rets = simulate(strategy=alphas.AlphaStrategy, download_data=False, external_data=True,
-                            cmd="04", period=14, fast_period=12, slow_period=26, smooth_period=9,
+                            cmd="04", period=20, fast_period=10, slow_period=30, smooth_period=5,
                             hyper_parameters=hyper_parameters)
         overall_rets["a04"] = a04_rets
     if test_set["alphas"]["05"]:
@@ -282,9 +282,15 @@ def run(hyper_parameters=HyperParameters, test_set=None):
     # MAIN CASE STRATEGY : (Momentum + Volume + Volatility) + (OPEN<>CLOSE<>HIGH<>LOW)
     if test_set["main_case"]:
         main_rets = simulate(strategy=main_case.MainLongShortStrategy, download_data=False, external_data=True,
-                             macd_short_window=12, macd_long_window=26, macd_signal_window=9,
-                             atr_window=14, volatility_threshold=0.1, macd_threshold=0.1, oc_diff_threshold=0.1,
-                             hl_diff_threshold=0.1, hyper_parameters=hyper_parameters)
+                             macd_short_window=10,
+                             macd_long_window=20,
+                             macd_signal_window=5,
+                             atr_window=1,
+                             volatility_threshold=0.001,
+                             macd_threshold=0.1,
+                             oc_diff_threshold=0.1,
+                             hl_diff_threshold=0.1,
+                             hyper_parameters=hyper_parameters)
         overall_rets["main_case"] = main_rets
 
     compare_and_visualize(overall_rets)

@@ -4,7 +4,7 @@ from strategy.strategy_interface import run
 
 ########################################################################################################################
 # ANALYSIS MODE DEACTIVATES THE SIMULATION TRIGGERING WHEN SET 'True'
-ANALYSIS_MODE = True
+ANALYSIS_MODE = False
 ########################################################################################################################
 
 # Test set
@@ -30,6 +30,31 @@ test_set = {
     "gpt-4": False,
     "main_case": True,
 }
+
+"""
+test_set = {
+    "randoms": False,
+    "naives": False,
+    "rsi": True,
+    "macd": False,
+    "sma": False,
+    "ema": False,
+    "bollinger": False,
+    "forest": False,
+    "alphas":
+    {
+        "01": False,
+        "02": False,
+        "03": False,
+        "04": False,
+        "05": False,
+    },
+    "deep_neural": False,
+    "gpt-3.5": False,
+    "gpt-4": False,
+    "main_case": False,
+}
+"""
 
 # Hyperparameters
 hyperparameters = HyperParameters()

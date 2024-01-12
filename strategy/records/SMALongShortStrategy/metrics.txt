@@ -1,6 +1,6 @@
-**Cumulative Return:** 0.05502279935857768
-**Average Daily Return:** 0.0006342706547709162
-**Average Daily Excess Return:** -0.013064359482215388
-**Average Daily Return Standard Deviation:** 0.031535910038593476
-**Sharpe Ratio:** -0.4371235474991778
-**Maximum Drawdown:** 1079539.0476914672
+**Cumulative Return:** 0.3506931762224561
+**Average Daily Return:** 0.0012025311505794512
+**Average Daily Excess Return:** -0.01249609898640685
+**Average Daily Return Standard Deviation:** 0.027721260029170747
+**Sharpe Ratio:** -0.39923503072309424
+**Maximum Drawdown:** 1383956.3336407456

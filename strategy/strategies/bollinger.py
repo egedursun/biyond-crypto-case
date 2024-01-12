@@ -3,7 +3,7 @@ import pandas as pd
 
 class BollingerLongShortStrategy:
     """
-    Boilinger Bands long/short strategy.
+    Bollinger Bands long/short strategy.
     """
     def __init__(self):
         self.name = 'BoilingerLongShortStrategy'
