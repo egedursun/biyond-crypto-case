@@ -51,10 +51,10 @@
 10. Extra parameters: Transaction Costs [X]
 11. Extra parameters: Adjustable Transaction Volume [X]
 12. Streamlit integration for visualization [X]
-13. Integrate written metrics to the Streamlit frontend [.] ~12.01.2024
-14. Integrate hyperparameter adjustment via Streamlit [.] ~12.01.2024
-15. Integrate dynamic function parameters via Streamlit [.] ~12.01.2024
-16. Write the final report [..]  ~13.01.2024
+13. Integrate written metrics to the Streamlit frontend [X]
+14. Integrate hyperparameter adjustment via Streamlit [X]
+15. Integrate dynamic function parameters via Streamlit [X]
+16. Write the final report [X]
 
 **Started at:** 2024-01-08 22:00:00 UTC+03:00
 **Last updated at:** 2024-01-12 02:00:00 UTC+03:00
